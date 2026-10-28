@@ -1,0 +1,17 @@
+[project]
+name = "summit-air-agent"
+version = "0.1.0"
+description = "Inbound AI phone agent for Summit Air"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "livekit-agents~=1.8",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
