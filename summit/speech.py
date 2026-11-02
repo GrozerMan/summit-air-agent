@@ -52,3 +52,23 @@ def say_phone(e164: str) -> str:
     """Format +15165550142 as 516-555-0142, which TTS reads out digit by digit."""
     digits = e164.removeprefix("+1")
     return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+
+
+_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+
+
+def say_hotline(number: str) -> str:
+    """Spell a phone number out for TTS, group by group: "1-800-490-0045" becomes
+    "one, eight hundred, four nine zero, zero zero four five".
+
+    Used for numbers a caller has to remember under stress, where TTS reading
+    "490" as "four hundred ninety" costs them a second they don't have.
+    """
+    groups = re.findall(r"\d+", number)
+    spoken = []
+    for group in groups:
+        if group in ("800", "888"):
+            spoken.append("eight hundred" if group == "800" else "triple eight")
+        else:
+            spoken.append(" ".join(_WORDS[int(d)] for d in group))
+    return ", ".join(spoken)

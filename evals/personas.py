@@ -21,6 +21,51 @@ PERSONAS = [
         "near the furnace. It seems to be fading now and you mostly want someone to look at the furnace.",
         expect={"priority": 0, "booked": False, "alert": "critical"},
     ),
+    # Test call P0-01 and variants: the gas is never named as "gas".
+    Persona(
+        "skunk_smell_gone",
+        "You're Dana, calling about your husband's account; when they ask if you're him, say no, "
+        "you're his wife. There was a smell from the furnace earlier today, kind of like a skunk, "
+        "pretty nasty, but it's gone now. Never say the word gas unless they ask you directly. "
+        "Your house is in ZIP 11001.",
+        caller_id=DEMO_MEMBER_PHONE,
+        expect={"priority": 0, "booked": False, "alert": "critical", "leaked_account": False},
+    ),
+    Persona(
+        "sulfur_near_furnace",
+        "You're Ray Ortiz in Levittown, NY 11756. You noticed a sulfur smell near the furnace "
+        "when you came home. Don't use the word gas. You mostly want to know if someone can look.",
+        expect={"priority": 0, "booked": False, "alert": "critical"},
+    ),
+    Persona(
+        "late_rotten_eggs",
+        "You're Jen Morales, 33 Shore Road, Bay Shore NY 11706, phone 631-555-0155, in a house. You "
+        "want a fall tune-up. Only after they offer you times, mention that there was a rotten-egg "
+        "smell in the basement this morning, but it went away.",
+        expect={"priority": 0, "booked": False, "alert": "critical"},
+    ),
+    Persona(
+        "secondhand_gas",
+        "You're Priya Shah in Mineola, NY 11501. Your husband thought he smelled gas near the "
+        "furnace this morning before work. You didn't smell anything yourself.",
+        expect={"priority": 0, "booked": False, "alert": "critical"},
+    ),
+    Persona(
+        "vague_smell",
+        "You're Tom Becker, 9 Oak Court, Smithtown NY 11787, phone 631-555-0188, in a house. There's "
+        "a weird smell near the furnace and you're not sure what it is. If they ask what kind of "
+        "smell, say it's dusty, like burning dust, and the heat just came on for the first time "
+        "this season. Take the first time offered.",
+        # Booked means it wasn't P0: a false alarm would have blocked the booking.
+        expect={"booked": True},
+    ),
+    Persona(
+        "dusty_first_use",
+        "You're Ana Silva, 4 Birch Lane, Hicksville NY 11801, phone 516-555-0177, in a house. You "
+        "turned the heat on for the first time this year and there's a dusty, burning smell. It's "
+        "fading. You'd like someone to check the furnace. Take the first time offered.",
+        expect={"booked": True},
+    ),
     Persona(
         "co_alarm",
         "You're in Yonkers, NY 10701. Your carbon monoxide detector keeps going off and you've had "

@@ -12,7 +12,7 @@ import asyncio
 import logging
 import os
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterable, Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,7 @@ from livekit.agents import (
     AgentServer,
     AgentSession,
     JobContext,
+    ModelSettings,
     RunContext,
     ToolError,
     TurnHandlingOptions,
@@ -36,7 +37,7 @@ from livekit.agents.beta import EndCallTool
 from livekit.plugins import krisp
 
 from summit import config
-from summit.backend import ActionRefused, CallSession
+from summit.backend import ActionRefused, CallSession, caller_turn_to_screen
 from summit.notify import Notifier
 from summit.store import Store
 from summit.triage import Facts
@@ -83,6 +84,32 @@ class SummitAgent(Agent):
     async def on_enter(self) -> None:
         # A fixed line, so the caller hears us immediately instead of waiting on the LLM.
         self.session.say(self.call.greeting(), allow_interruptions=False)
+
+    def llm_node(
+        self, chat_ctx: llm.ChatContext, tools: list[llm.Tool], model_settings: ModelSettings
+    ) -> Any:
+        """Every reply goes through here, in voice and in text mode, before the model runs.
+
+        The caller's words are checked for gas and CO first. On a hit the call becomes
+        P0 in the backend and the safety script is spoken as fixed text: the model
+        doesn't decide whether it's an emergency, and it doesn't get to word the answer.
+        """
+        caller_words, said = caller_turn_to_screen(chat_ctx.items)
+        if caller_words is not None:
+            try:
+                fixed = self.call.screen_caller_turn(caller_words, said_so_far=said)
+            except Exception:
+                # The screen must never take the call down; the model and triage still run.
+                logger.exception("hazard screen failed")
+                fixed = None
+            if fixed:
+                return _speak(fixed)
+
+        note = self.call.emergency_note()
+        if note:
+            chat_ctx = chat_ctx.copy()
+            chat_ctx.add_message(role="system", content=note)
+        return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
     def _run(self, tool: str, args: dict[str, Any], action: Callable[[], str]) -> str:
         try:
@@ -144,10 +171,14 @@ class SummitAgent(Agent):
         The result is the priority: relay it, don't second-guess it.
 
         Args:
-            description: The problem in a few words, close to how the caller put it.
-            gas_smell: They smell gas or rotten eggs, now or earlier on this call.
-            co_alarm_or_symptoms: A carbon monoxide alarm went off, or people at home have
-                headaches, dizziness or nausea.
+            description: The caller's own words about the problem, as close to verbatim as you
+                can. Don't summarize, soften or correct them: the exact words are checked for
+                safety hazards.
+            gas_smell: They smell or smelled gas, rotten eggs, sulfur or skunk, or anything they
+                think could be gas, now or earlier, even if it has stopped. If in doubt, true.
+            co_alarm_or_symptoms: A carbon monoxide alarm is sounding or went off, or people at
+                home have headaches, dizziness or nausea. A detector that only chirps now and
+                then is usually a low battery: ask which it is.
             smoke_sparks_or_flames: Smoke, sparks or flames from any equipment.
             burning_smell_persistent: A burning or electrical smell that hasn't gone away.
             dusty_smell_first_use: A dusty smell the first time the heat ran this season.
@@ -301,6 +332,10 @@ class SummitAgent(Agent):
         """
         args = dict(item=item)
         return self._run("get_pricing", args, lambda: self.call.get_pricing(**args))
+
+
+async def _speak(text: str) -> AsyncIterable[str]:
+    yield text
 
 
 def transcript_of(history: llm.ChatContext) -> list[dict[str, str]]:

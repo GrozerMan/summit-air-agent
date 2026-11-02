@@ -45,3 +45,24 @@ async def test_refusals_reach_the_model_as_tool_errors(member_call):
     with pytest.raises(ToolError, match="assess_situation"):
         await agent.find_appointment_options(None)
     assert member_call.tool_log[-1]["refused"] is True
+
+
+async def _reply(agent, user_text):
+    from livekit.agents import ModelSettings, llm
+
+    ctx = llm.ChatContext()
+    ctx.add_message(role="system", content="instructions")
+    ctx.add_message(role="user", content=user_text)
+    return "".join([chunk async for chunk in agent.llm_node(ctx, [], ModelSettings())])
+
+
+async def test_gas_words_get_the_script_without_the_model(make_call):
+    # Test call P0-01. No LLM is configured, so any reply here came from the fixed path.
+    from summit.models import Priority
+
+    call = make_call(None)
+    said = await _reply(
+        SummitAgent(call), "It's kinda like a skunk. It happened earlier today. But now it's gone."
+    )
+    assert "leave the house now" in said and "nine-one-one" in said
+    assert call.priority == Priority.P0
