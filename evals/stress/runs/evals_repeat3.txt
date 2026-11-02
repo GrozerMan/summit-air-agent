@@ -1,0 +1,47 @@
+LLM request rate limited by inference gateway
+failed to generate LLM completion: message='Error code: 429', status_code=429, retryable=True, body=LLM request/min rate limit exceeded, category: MaxConcurrentGatewayLLMRpm, remaining_limit: 0, current_usage: 106, session_id: 196c319a-af74-4347-bcf3-9da2ac635ff4, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded, retrying in 0.1s
+LLM request rate limited by inference gateway
+failed to generate LLM completion: message='Error code: 429', status_code=429, retryable=True, body=LLM request/min rate limit exceeded, category: MaxConcurrentGatewayLLMRpm, remaining_limit: 0, current_usage: 106, session_id: 8ef28daa-8d3b-42e1-a8cb-553bab8b43cb, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded, retrying in 2.0s
+LLM request rate limited by inference gateway
+failed to generate LLM completion: message='Error code: 429', status_code=429, retryable=True, body=LLM request/min rate limit exceeded, category: MaxConcurrentGatewayLLMRpm, remaining_limit: 0, current_usage: 106, session_id: 59f2ed16-9fe4-44af-b4df-8080962b2ac6, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded, retrying in 2.0s
+LLM request rate limited by inference gateway
+Traceback (most recent call last):
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 342, in _main_task
+    await self._run()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/inference/llm.py", line 619, in _run
+    raise APIStatusError(
+livekit.agents._exceptions.APIStatusError: message='Error code: 429', status_code=429, retryable=True, body=LLM request/min rate limit exceeded, category: MaxConcurrentGatewayLLMRpm, remaining_limit: 0, current_usage: 106, session_id: 37a98588-230b-4c85-9c20-814311ccdcf2, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/lovishchugh/Desktop/summit-air-agent/evals/run.py", line 58, in <module>
+    sys.exit(asyncio.run(main()))
+             ^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/asyncio/base_events.py", line 653, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/evals/run.py", line 42, in main
+    result = await run_persona(persona, judge=not args.no_judge)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/evals/harness.py", line 107, in run_persona
+    said = (await caller_llm.chat(chat_ctx=caller_ctx).collect()).text.strip()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 570, in collect
+    async for chunk in self:
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 515, in __anext__
+    raise exc  # noqa: B904
+    ^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 279, in _traceable_main_task
+    await self._main_task()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 364, in _main_task
+    raise APIConnectionError(
+livekit.agents._exceptions.APIConnectionError: failed to generate LLM completion after 4 attempts (caused by APIStatusError: message='Error code: 429', status_code=429, retryable=True, body=LLM request/min rate limit exceeded, category: MaxConcurrentGatewayLLMRpm, remaining_limit: 0, current_usage: 106, session_id: 37a98588-230b-4c85-9c20-814311ccdcf2, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded)

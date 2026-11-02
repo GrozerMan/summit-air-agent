@@ -1,0 +1,94 @@
+{
+  "persona": "dusty_first_use",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, I just turned on my heat for the first time this year and there was a dusty burning smell. Could someone come check my furnace?"
+    },
+    {
+      "role": "assistant",
+      "text": "That dusty smell on first heat use is normal. Can you please tell me the ZIP code and what kind of home it is?"
+    },
+    {
+      "role": "user",
+      "text": "Sure, my ZIP code is 11801, and it's a house."
+    },
+    {
+      "role": "assistant",
+      "text": "We can send a technician tomorrow. They can arrive between 8 and 10 in the morning, or between 10 and noon, or between noon and 2 in the afternoon. Which window would work best for you?"
+    },
+    {
+      "role": "user",
+      "text": "The 8 to 10 in the morning window works for me, please."
+    },
+    {
+      "role": "assistant",
+      "text": "Great, I'll get that slot ready for you. Can I have your first and last name, please?"
+    },
+    {
+      "role": "user",
+      "text": "It's Ana Silva."
+    },
+    {
+      "role": "assistant",
+      "text": "Thanks, Ana. What is the best phone number to reach you at?"
+    },
+    {
+      "role": "user",
+      "text": "You can reach me at 516-555-0177."
+    },
+    {
+      "role": "assistant",
+      "text": "Got it, 5-1-6, 5-5-5, 0-1-7-7. Please confirm, is that right?"
+    },
+    {
+      "role": "user",
+      "text": "Yes, that's correct. Thank you."
+    },
+    {
+      "role": "assistant",
+      "text": "And the service address is a house in ZIP code 11801, correct? May I have the full address, please?"
+    },
+    {
+      "role": "user",
+      "text": "Yes, that\u2019s right. The address is 4 Birch Lane, Hicksville, NY 11801."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you, 4 Birch Lane, Hicksville, NY, 11801. Is that correct?"
+    },
+    {
+      "role": "user",
+      "text": "Yes, that\u2019s correct."
+    },
+    {
+      "role": "assistant",
+      "text": "You're all set for tomorrow, Wednesday, between 8 and 10 in the morning, at 4 Birch Lane, Hicksville. A technician will come then to check the dusty burning smell from your first heat use. Is there anything else I can help with?"
+    },
+    {
+      "role": "user",
+      "text": "No, that\u2019s all for now. Thanks so much! Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "You're welcome, Ana. Have a good day and goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "1 booked"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, brief, asked for one thing at a time without repetition or jargon, and did not invent facts or promises."
+  },
+  "passed": true
+}

@@ -1,0 +1,109 @@
+{
+  "persona": "no_heat_elderly",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, my heat's been out since last night. It's 61 degrees inside, and my mom's 82 and lives with me. Can you send someone as soon as possible?"
+    },
+    {
+      "role": "assistant",
+      "text": "Sorry to hear the heat is out, and I see someone vulnerable is home. Could I have the ZIP code and the type of property where the heat is out?"
+    },
+    {
+      "role": "user",
+      "text": "Sure, it's 11772, single-family house."
+    },
+    {
+      "role": "assistant",
+      "text": "We can send a technician today between noon and 2 in the afternoon, or later in the day until 6. What arrival window works for you?"
+    },
+    {
+      "role": "user",
+      "text": "Please send someone noon to 2 if you can."
+    },
+    {
+      "role": "assistant",
+      "text": "I can book you for noon to 2 today. May I have your first and last name for the appointment?"
+    },
+    {
+      "role": "user",
+      "text": "Kevin Park."
+    },
+    {
+      "role": "assistant",
+      "text": "Thanks, Kevin. What is the best phone number to reach you at?"
+    },
+    {
+      "role": "user",
+      "text": "631-555-0144."
+    },
+    {
+      "role": "assistant",
+      "text": "That's 6-3-1, 5-5-5, 0-1-4-4. Is that right?"
+    },
+    {
+      "role": "user",
+      "text": "That's right."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you. What is the street address for the appointment? Please include town and ZIP."
+    },
+    {
+      "role": "user",
+      "text": "22 Willow Drive, Patchogue, 11772."
+    },
+    {
+      "role": "assistant",
+      "text": "Your address is 22 Willow Drive, Patchogue, 11772. Is that correct?"
+    },
+    {
+      "role": "user",
+      "text": "Yes, that's correct."
+    },
+    {
+      "role": "assistant",
+      "text": "Your appointment is set for today between noon and 2 PM at 22 Willow Drive in Patchogue. A technician will come then. We charge a $129 diagnostic fee, and any repair costs are quoted on site. Is there anything else I can do for you?"
+    },
+    {
+      "role": "user",
+      "text": "No, that's everything. Thanks for your help. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "You're welcome. Take care, and goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P1, got P1"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "1 booked"
+    },
+    {
+      "name": "phone",
+      "passed": true,
+      "detail": "booked phones: ['+16315550144']"
+    },
+    {
+      "name": "within_hours",
+      "passed": true,
+      "detail": "starts Tue 12:00"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, brief, asked one thing at a time, did not repeat answered questions, avoided jargon, and made no invented promises."
+  },
+  "passed": true
+}

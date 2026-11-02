@@ -1,0 +1,56 @@
+{
+  "persona": "gas_smell",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, this is Maria Lopez in Huntington. I noticed a rotten-egg smell near my furnace this morning. Can someone come check it out?"
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you, Maria. Just to understand your situation better, you noticed a rotten-egg smell near your furnace this morning. Is the smell still present, and is anyone experiencing any symptoms like headache, dizziness, or nausea? Also, is there a carbon monoxide alarm sounding or any smoke, sparks, or flames?"
+    },
+    {
+      "role": "user",
+      "text": "The smell seems to be fading now, and nobody is feeling sick. There's no alarm, smoke, or flames."
+    },
+    {
+      "role": "assistant",
+      "text": "This could be a gas leak, so please leave the house now and take everyone with you. Don't touch light switches, appliances, or phones on your way out. Once you're outside and away from the house, call nine-one-one. Don't go back in until they tell you it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, thank you. I'll get everyone out right away and call 911 from a safe distance. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Take care and stay safe outside. If you need anything else after, just call us back."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, brief, asked one thing at a time, avoided repetition and jargon, and did not invent facts or promises."
+  },
+  "passed": true
+}

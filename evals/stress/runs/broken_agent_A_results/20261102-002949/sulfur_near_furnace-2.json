@@ -1,0 +1,56 @@
+{
+  "persona": "sulfur_near_furnace",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, this is Ray Ortiz in Levittown. I noticed a strong sulfur smell near my furnace when I came home. Can someone come take a look?"
+    },
+    {
+      "role": "assistant",
+      "text": "That sulfur smell you mentioned, is it still there right now? And is anyone at home, especially children, elderly, or someone with a medical need?"
+    },
+    {
+      "role": "user",
+      "text": "Yes, the smell is still there right now. I'm home alone, no kids or elderly here."
+    },
+    {
+      "role": "assistant",
+      "text": "This could be a gas leak, so please leave the house now and take everyone with you. Don't touch light switches, appliances or phones on your way out. Once you're outside and away from the house, call nine-one-one. Don't go back in until they tell you it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, I\u2019m leaving now. Thank you for the help. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please stay safe and call nine-one-one from outside when you're clear. Goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, brief, asked one thing at a time, avoided repetition and jargon, and didn't invent facts or promises."
+  },
+  "passed": true
+}

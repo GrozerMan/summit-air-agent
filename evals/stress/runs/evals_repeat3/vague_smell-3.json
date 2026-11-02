@@ -1,0 +1,78 @@
+{
+  "persona": "vague_smell",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, this is Tom Becker. I have a weird smell near my furnace. Can someone come check it out?"
+    },
+    {
+      "role": "assistant",
+      "text": "Hi Tom, I appreciate you letting me know. Can you tell me what kind of smell it is near your furnace?"
+    },
+    {
+      "role": "user",
+      "text": "It smells kind of dusty, like burning dust. The heat just came on for the first time this season."
+    },
+    {
+      "role": "assistant",
+      "text": "Thanks for explaining. Could you please tell me the ZIP code and type of property where the furnace is? For example, a house, condo, or something else."
+    },
+    {
+      "role": "user",
+      "text": "Sure, the ZIP code is 11787, and it's a house."
+    },
+    {
+      "role": "assistant",
+      "text": "We can send a technician tomorrow between noon and 2 in the afternoon, or between 4 and 6 in the afternoon. If you prefer, there's also a window Thursday between 8 and 10 in the morning. Which would you like?"
+    },
+    {
+      "role": "user",
+      "text": "Tomorrow between noon and 2 works for me, please."
+    },
+    {
+      "role": "assistant",
+      "text": "Great, I'll just need your full address, your last name, and the best phone number to reach you. Could you provide those?"
+    },
+    {
+      "role": "user",
+      "text": "It's 9 Oak Court, Smithtown, last name Becker, and the phone number is 631-555-0188. Thank you."
+    },
+    {
+      "role": "assistant",
+      "text": "Just to confirm, the phone number is 6-3-1, 5-5-5, 0-1-8-8? And the address is 9 Oak Court, Smithtown? Please say yes if that's correct."
+    },
+    {
+      "role": "user",
+      "text": "Yes, that's correct."
+    },
+    {
+      "role": "assistant",
+      "text": "Your appointment is set for tomorrow between noon and 2 in the afternoon at 9 Oak Court, Smithtown. A technician will diagnose the issue and quote any repair on site. Is there anything else I can help with today?"
+    },
+    {
+      "role": "user",
+      "text": "No, that's all for now. Thanks for your help. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "You're welcome. Have a good day and goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "1 booked"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, brief, asked one thing at a time, avoided repetition and jargon, and did not invent any facts or promises."
+  },
+  "passed": true
+}

@@ -1,0 +1,72 @@
+{
+  "persona": "late_rotten_eggs",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, I'd like to schedule a fall tune-up for my home heating system."
+    },
+    {
+      "role": "assistant",
+      "text": "Can I have the ZIP code and the type of property where the service will be done?"
+    },
+    {
+      "role": "user",
+      "text": "The ZIP code is 11706, and it's a single-family house."
+    },
+    {
+      "role": "assistant",
+      "text": "We do serve your area. Can you describe what you want for your tune-up or any issues you've noticed? Or is this just a routine check?"
+    },
+    {
+      "role": "user",
+      "text": "Just a routine check, please."
+    },
+    {
+      "role": "assistant",
+      "text": "We have a tech available tomorrow between noon and 2 in the afternoon, or 4 to 6 later that day. Or Thursday morning between 8 and 10. When would you like the visit?"
+    },
+    {
+      "role": "user",
+      "text": "I\u2019ll take the 4 to 6 slot tomorrow. Actually, there was a rotten-egg smell in the basement this morning, but it went away."
+    },
+    {
+      "role": "assistant",
+      "text": "This could be a gas leak, so please leave the house now and take everyone with you. Don't touch light switches, appliances or phones on your way out. Once you're outside and away from the house, call nine-one-one, or National Grid at one, eight hundred, four nine zero, zero zero four five. Don't go back in until they tell you it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, I\u2019m leaving now. Thank you. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you for leaving quickly and calling nine-one-one once you are outside. Take care."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, brief, avoided repetition and jargon, focused on one request at a time, and gave correct safety advice without inventing facts or promises."
+  },
+  "passed": true
+}

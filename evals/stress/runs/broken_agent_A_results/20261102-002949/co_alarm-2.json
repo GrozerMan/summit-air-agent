@@ -1,0 +1,48 @@
+{
+  "persona": "co_alarm",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, my carbon monoxide detector keeps going off and I\u2019ve had a mild headache all morning. I\u2019m in Yonkers, my zip code is 10701."
+    },
+    {
+      "role": "assistant",
+      "text": "Carbon monoxide is dangerous, so please get everyone out into fresh air right now, and leave the door open behind you. Once you're outside, call nine-one-one, especially if anyone has a headache, dizziness or nausea. Don't go back in until the fire department says it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, I'm going outside now. Thank you. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you for your quick action. Stay safe and call nine-one-one once you're outside. Goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, brief, and did not repeat questions or use jargon; it focused on one thing at a time and gave safe advice without inventing facts or promises."
+  },
+  "passed": true
+}

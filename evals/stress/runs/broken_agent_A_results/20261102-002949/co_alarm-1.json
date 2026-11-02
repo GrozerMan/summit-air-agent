@@ -1,0 +1,64 @@
+{
+  "persona": "co_alarm",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, my carbon monoxide detector keeps going off, and I have a mild headache. I'm in Yonkers, NY 10701."
+    },
+    {
+      "role": "assistant",
+      "text": "Carbon monoxide is dangerous, so please get everyone out into fresh air right now, and leave the door open behind you. Once you're outside, call nine-one-one, especially if anyone has a headache, dizziness or nausea. Don't go back in until the fire department says it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, I\u2019m stepping outside now and will call 911. Thank you. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please stay outside and call nine-one-one right away if you haven't already."
+    },
+    {
+      "role": "user",
+      "text": "I've called 911 and waiting outside now. Thanks again. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "You're doing the right thing by staying outside and waiting for help."
+    },
+    {
+      "role": "user",
+      "text": "Thanks for your help. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please stay outside and call nine-one-one immediately if you have not done so. Goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": false,
+    "detail": "The agent repeatedly reminded the caller to call 911 and stay outside after the caller had already confirmed taking those actions, failing to avoid repetition."
+  },
+  "passed": false
+}

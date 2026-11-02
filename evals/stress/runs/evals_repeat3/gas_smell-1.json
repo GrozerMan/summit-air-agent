@@ -1,0 +1,72 @@
+{
+  "persona": "gas_smell",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, this is Maria Lopez in Huntington. I noticed a rotten-egg smell near my furnace this morning. I'd like someone to come take a look."
+    },
+    {
+      "role": "assistant",
+      "text": "This could be a gas leak, so please leave the house now and take everyone with you. Don't touch light switches, appliances or phones on your way out. Once you're outside and away from the house, call nine-one-one. Don't go back in until they tell you it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, thank you. I'll get outside right now. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please leave your home immediately, get everyone out safely, and call nine-one-one from outside."
+    },
+    {
+      "role": "user",
+      "text": "I understand. I'm outside now and will call 911. Thank you, goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you for your cooperation, Maria. Stay outside and wait for emergency responders."
+    },
+    {
+      "role": "user",
+      "text": "Will do. Thank you again. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Take care, Maria. Please stay outside and wait for the emergency responders."
+    },
+    {
+      "role": "user",
+      "text": "Thank you, I will. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Goodbye, and stay safe outside while you wait for emergency help."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": false,
+    "detail": "The agent repeatedly gave the same instructions after the caller indicated understanding and action, making the conversation less brief and clear."
+  },
+  "passed": false
+}

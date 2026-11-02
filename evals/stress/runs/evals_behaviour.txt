@@ -1,0 +1,990 @@
+....FFFF                                                                 [100%]
+=================================== FAILURES ===================================
+________________ test_dusty_first_use_smell_is_not_an_emergency ________________
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x109cad610>
+
+    async def _main_task(self) -> None:
+        self._llm_request_span = trace.get_current_span()
+    
+        for i in range(self._conn_options.max_retry + 1):
+            try:
+                with self._attempt_span() as attempt_span:
+                    attempt_span.set_attribute(trace_types.ATTR_RETRY_COUNT, i)
+                    # Reset per-attempt context ids; the monitor task populates
+                    # this as ChatChunks arrive.
+                    self._provider_request_ids = []
+                    try:
+>                       await self._run()
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:342: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x109cad610>
+
+    async def _run(self) -> None:
+        start_time = time.time()
+    
+        all_failed = all(not llm_status.available for llm_status in self._fallback_adapter._status)
+        if all_failed:
+            logger.error("all LLMs are unavailable, retrying..")
+    
+        for i in self._fallback_adapter._llm_order():
+            llm = self._fallback_adapter._llm_instances[i]
+            llm_status = self._fallback_adapter._status[i]
+            if llm_status.available or all_failed:
+                self._fallback_adapter._attempt_id += 1
+                attempt_id = self._fallback_adapter._attempt_id
+                llm_status.selection_id = attempt_id
+                text_sent: str = ""
+                tool_calls_sent: list[str] = []
+                try:
+                    async for result in self._try_generate(llm=llm, check_recovery=False):
+                        if result.delta:
+                            if result.delta.content:
+                                text_sent += result.delta.content
+                            for tool_call in result.delta.tool_calls:
+                                tool_calls_sent.append(tool_call.name)
+    
+                        self._event_ch.send_nowait(result)
+    
+                    # Restore this selection after concurrent failures without outranking
+                    # a newer selection that has not failed.
+                    llm_status.selection_id = max(llm_status.selection_id, attempt_id)
+                    if self._fallback_adapter._sticky and not llm_status.available:
+                        llm_status.available = True
+                        self._fallback_adapter.emit(
+                            "llm_availability_changed",
+                            AvailabilityChangedEvent(llm=llm, available=True),
+                        )
+    
+                    # request-side attributes named the instance expected to serve; the
+                    # response side names the one that did (from `llm`, not the adapter:
+                    # concurrent requests may be served by different instances)
+                    response_attrs = {
+                        trace_types.ATTR_GEN_AI_RESPONSE_MODEL: llm.model,
+                        **_provider_attr(llm),
+                    }
+                    if self._llm_request_span is not None:
+                        self._llm_request_span.set_attributes(
+                            {
+                                trace_types.ATTR_FALLBACK_LABEL: llm.label,
+                                trace_types.ATTR_FALLBACK_INDEX: i,
+                                **response_attrs,
+                            }
+                        )
+                    self._caller_span.set_attributes(response_attrs)
+                    return
+                except Exception:  # exceptions already logged inside _try_generate
+                    llm_status.selection_id = 0
+                    if llm_status.available:
+                        llm_status.available = False
+                        self._fallback_adapter.emit(
+                            "llm_availability_changed",
+                            AvailabilityChangedEvent(llm=llm, available=False),
+                        )
+    
+                    if text_sent or tool_calls_sent:
+                        extra = {"text_sent": text_sent, "tool_calls_sent": tool_calls_sent}
+                        if not self._fallback_adapter._retry_on_chunk_sent:
+                            logger.error(
+                                f"{llm.label} failed after sending chunk, skip retrying. "
+                                "Set `retry_on_chunk_sent` to `True` to enable retrying after chunks are sent.",
+                                extra=extra,
+                            )
+                            raise
+    
+                        logger.warning(
+                            f"{llm.label} failed after sending chunk, retrying..",
+                            extra=extra,
+                        )
+    
+            self._try_recovery(llm)
+    
+>       raise APIConnectionError(
+            f"all LLMs failed ({[llm.label for llm in self._fallback_adapter._llm_instances]}) after {time.time() - start_time} seconds"  # noqa: E501
+        )
+E       livekit.agents._exceptions.APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.10033106803894043 seconds
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/fallback_adapter.py:402: APIConnectionError
+
+The above exception was the direct cause of the following exception:
+
+    async def test_dusty_first_use_smell_is_not_an_emergency():
+>       call, _ = await first_turn(
+            "We turned the heat on for the first time this year and there's a dusty burning smell."
+        )
+
+evals/test_behaviour.py:50: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+evals/test_behaviour.py:22: in first_turn
+    return call, await session.run(user_input=user_input)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/voice/run_result.py:186: in _await_impl
+    await asyncio.shield(self._done_fut)
+.venv/lib/python3.11/site-packages/livekit/agents/utils/log.py:17: in async_fn_logs
+    return await fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/opentelemetry/util/_decorator.py:61: in async_wrapper
+    return await func(*args, **kwargs)  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/voice/generation.py:271: in _llm_inference_task
+    async for chunk in llm_node:
+.venv/lib/python3.11/site-packages/livekit/agents/voice/agent.py:592: in llm_node
+    async for chunk in stream:
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:515: in __anext__
+    raise exc  # noqa: B904
+    ^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:279: in _traceable_main_task
+    await self._main_task()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x109cad610>
+
+    async def _main_task(self) -> None:
+        self._llm_request_span = trace.get_current_span()
+    
+        for i in range(self._conn_options.max_retry + 1):
+            try:
+                with self._attempt_span() as attempt_span:
+                    attempt_span.set_attribute(trace_types.ATTR_RETRY_COUNT, i)
+                    # Reset per-attempt context ids; the monitor task populates
+                    # this as ChatChunks arrive.
+                    self._provider_request_ids = []
+                    try:
+                        await self._run()
+                    finally:
+                        if self._provider_request_ids:
+                            attempt_span.set_attribute(
+                                trace_types.ATTR_PROVIDER_REQUEST_IDS, self._provider_request_ids
+                            )
+                    return
+            except APIError as e:
+                # 499 (Client Closed Request) - close gracefully without raising
+                if isinstance(e, APIStatusError) and e.status_code == 499:
+                    return
+    
+                if not self._retry_on_chunk_sent and self._event_ch.output_sent:
+                    e.retryable = False
+    
+                retry_interval = self._conn_options._interval_for_retry(i)
+    
+                if self._conn_options.max_retry == 0 or not e.retryable:
+                    self._emit_error(e, recoverable=False)
+                    raise
+                elif i == self._conn_options.max_retry:
+                    self._emit_error(e, recoverable=False)
+>                   raise APIConnectionError(
+                        f"failed to generate LLM completion after {self._conn_options.max_retry + 1} attempts",  # noqa: E501
+                    ) from e
+E                   livekit.agents._exceptions.APIConnectionError: failed to generate LLM completion after 4 attempts (caused by APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.10033106803894043 seconds)
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:364: APIConnectionError
+------------------------------ Captured log call -------------------------------
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 24bc8180-1c37-4d35-afb8-519dd7898b30, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 4d6f5226-cad7-4fb8-8a7a-67c11bda63be, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: fec27071-2096-4ccc-b193-456037e13eae, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.18001937866210938 seconds, retrying in 0.1s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 7bf64a6b-3594-460d-b0db-1554d45b02d5, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 344693b1-c6f7-4690-863f-72841e60abef, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 9f0620fb-e0d0-46f6-a78a-f13004e68e36, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.08661818504333496 seconds, retrying in 2.0s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: fe78b0f7-d130-48fb-ae61-1a6b053def40, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 0e457178-d733-4e48-91c0-22d7c482ae49, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 6db3b486-af7a-495f-8ff0-2c65c90ca418, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 792a9577-639d-42dc-b40f-b5f2482a5aaa, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.09881901741027832 seconds, retrying in 2.0s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: c5a3218f-011d-4e60-904e-bcb464f67e5c, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: d089c86c-ba09-4803-b6a7-e0c778351432, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: e90ce7d2-6c77-45a1-9779-1ba457833561, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 507b41e6-fc9b-4ae3-a1a4-4aaf1290933b, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:log.py:22 Error in _llm_inference_task
+Traceback (most recent call last):
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 342, in _main_task
+    await self._run()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/fallback_adapter.py", line 402, in _run
+    raise APIConnectionError(
+livekit.agents._exceptions.APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.10033106803894043 seconds
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/utils/log.py", line 17, in async_fn_logs
+    return await fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/opentelemetry/util/_decorator.py", line 61, in async_wrapper
+    return await func(*args, **kwargs)  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/voice/generation.py", line 271, in _llm_inference_task
+    async for chunk in llm_node:
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/voice/agent.py", line 592, in llm_node
+    async for chunk in stream:
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 515, in __anext__
+    raise exc  # noqa: B904
+    ^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 279, in _traceable_main_task
+    await self._main_task()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 364, in _main_task
+    raise APIConnectionError(
+livekit.agents._exceptions.APIConnectionError: failed to generate LLM completion after 4 attempts (caused by APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.10033106803894043 seconds)
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 73060fe8-f80d-4ee2-8e46-d3627c50484c, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+_____________________ test_repair_costs_are_not_estimated ______________________
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x109f23c10>
+
+    async def _main_task(self) -> None:
+        self._llm_request_span = trace.get_current_span()
+    
+        for i in range(self._conn_options.max_retry + 1):
+            try:
+                with self._attempt_span() as attempt_span:
+                    attempt_span.set_attribute(trace_types.ATTR_RETRY_COUNT, i)
+                    # Reset per-attempt context ids; the monitor task populates
+                    # this as ChatChunks arrive.
+                    self._provider_request_ids = []
+                    try:
+>                       await self._run()
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:342: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x109f23c10>
+
+    async def _run(self) -> None:
+        start_time = time.time()
+    
+        all_failed = all(not llm_status.available for llm_status in self._fallback_adapter._status)
+        if all_failed:
+            logger.error("all LLMs are unavailable, retrying..")
+    
+        for i in self._fallback_adapter._llm_order():
+            llm = self._fallback_adapter._llm_instances[i]
+            llm_status = self._fallback_adapter._status[i]
+            if llm_status.available or all_failed:
+                self._fallback_adapter._attempt_id += 1
+                attempt_id = self._fallback_adapter._attempt_id
+                llm_status.selection_id = attempt_id
+                text_sent: str = ""
+                tool_calls_sent: list[str] = []
+                try:
+                    async for result in self._try_generate(llm=llm, check_recovery=False):
+                        if result.delta:
+                            if result.delta.content:
+                                text_sent += result.delta.content
+                            for tool_call in result.delta.tool_calls:
+                                tool_calls_sent.append(tool_call.name)
+    
+                        self._event_ch.send_nowait(result)
+    
+                    # Restore this selection after concurrent failures without outranking
+                    # a newer selection that has not failed.
+                    llm_status.selection_id = max(llm_status.selection_id, attempt_id)
+                    if self._fallback_adapter._sticky and not llm_status.available:
+                        llm_status.available = True
+                        self._fallback_adapter.emit(
+                            "llm_availability_changed",
+                            AvailabilityChangedEvent(llm=llm, available=True),
+                        )
+    
+                    # request-side attributes named the instance expected to serve; the
+                    # response side names the one that did (from `llm`, not the adapter:
+                    # concurrent requests may be served by different instances)
+                    response_attrs = {
+                        trace_types.ATTR_GEN_AI_RESPONSE_MODEL: llm.model,
+                        **_provider_attr(llm),
+                    }
+                    if self._llm_request_span is not None:
+                        self._llm_request_span.set_attributes(
+                            {
+                                trace_types.ATTR_FALLBACK_LABEL: llm.label,
+                                trace_types.ATTR_FALLBACK_INDEX: i,
+                                **response_attrs,
+                            }
+                        )
+                    self._caller_span.set_attributes(response_attrs)
+                    return
+                except Exception:  # exceptions already logged inside _try_generate
+                    llm_status.selection_id = 0
+                    if llm_status.available:
+                        llm_status.available = False
+                        self._fallback_adapter.emit(
+                            "llm_availability_changed",
+                            AvailabilityChangedEvent(llm=llm, available=False),
+                        )
+    
+                    if text_sent or tool_calls_sent:
+                        extra = {"text_sent": text_sent, "tool_calls_sent": tool_calls_sent}
+                        if not self._fallback_adapter._retry_on_chunk_sent:
+                            logger.error(
+                                f"{llm.label} failed after sending chunk, skip retrying. "
+                                "Set `retry_on_chunk_sent` to `True` to enable retrying after chunks are sent.",
+                                extra=extra,
+                            )
+                            raise
+    
+                        logger.warning(
+                            f"{llm.label} failed after sending chunk, retrying..",
+                            extra=extra,
+                        )
+    
+            self._try_recovery(llm)
+    
+>       raise APIConnectionError(
+            f"all LLMs failed ({[llm.label for llm in self._fallback_adapter._llm_instances]}) after {time.time() - start_time} seconds"  # noqa: E501
+        )
+E       livekit.agents._exceptions.APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.09045195579528809 seconds
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/fallback_adapter.py:402: APIConnectionError
+
+The above exception was the direct cause of the following exception:
+
+    async def test_repair_costs_are_not_estimated():
+>       _, result = await first_turn("Roughly how much does it cost to replace a blower motor?")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+evals/test_behaviour.py:57: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+evals/test_behaviour.py:22: in first_turn
+    return call, await session.run(user_input=user_input)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/voice/run_result.py:186: in _await_impl
+    await asyncio.shield(self._done_fut)
+.venv/lib/python3.11/site-packages/livekit/agents/utils/log.py:17: in async_fn_logs
+    return await fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/opentelemetry/util/_decorator.py:61: in async_wrapper
+    return await func(*args, **kwargs)  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/voice/generation.py:271: in _llm_inference_task
+    async for chunk in llm_node:
+.venv/lib/python3.11/site-packages/livekit/agents/voice/agent.py:592: in llm_node
+    async for chunk in stream:
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:515: in __anext__
+    raise exc  # noqa: B904
+    ^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:279: in _traceable_main_task
+    await self._main_task()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x109f23c10>
+
+    async def _main_task(self) -> None:
+        self._llm_request_span = trace.get_current_span()
+    
+        for i in range(self._conn_options.max_retry + 1):
+            try:
+                with self._attempt_span() as attempt_span:
+                    attempt_span.set_attribute(trace_types.ATTR_RETRY_COUNT, i)
+                    # Reset per-attempt context ids; the monitor task populates
+                    # this as ChatChunks arrive.
+                    self._provider_request_ids = []
+                    try:
+                        await self._run()
+                    finally:
+                        if self._provider_request_ids:
+                            attempt_span.set_attribute(
+                                trace_types.ATTR_PROVIDER_REQUEST_IDS, self._provider_request_ids
+                            )
+                    return
+            except APIError as e:
+                # 499 (Client Closed Request) - close gracefully without raising
+                if isinstance(e, APIStatusError) and e.status_code == 499:
+                    return
+    
+                if not self._retry_on_chunk_sent and self._event_ch.output_sent:
+                    e.retryable = False
+    
+                retry_interval = self._conn_options._interval_for_retry(i)
+    
+                if self._conn_options.max_retry == 0 or not e.retryable:
+                    self._emit_error(e, recoverable=False)
+                    raise
+                elif i == self._conn_options.max_retry:
+                    self._emit_error(e, recoverable=False)
+>                   raise APIConnectionError(
+                        f"failed to generate LLM completion after {self._conn_options.max_retry + 1} attempts",  # noqa: E501
+                    ) from e
+E                   livekit.agents._exceptions.APIConnectionError: failed to generate LLM completion after 4 attempts (caused by APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.09045195579528809 seconds)
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:364: APIConnectionError
+------------------------------ Captured log call -------------------------------
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 8130f7cc-633e-4103-810d-9a12d728524a, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: ffb2b396-ec4b-4b9e-97b2-06556bd5248d, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 942822f6-2b96-4544-b11d-aed3b09e808b, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.17823505401611328 seconds, retrying in 0.1s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: e5da30b6-83e5-4c1a-96ae-4aa9852a0e64, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 8fcf65e7-6d5a-4eb9-a7c9-7fe0bfecbe48, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 1cb267b6-0d26-4113-89b4-74723173cee1, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.09133005142211914 seconds, retrying in 2.0s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: c947a979-ab9e-4ee2-b8cc-d12c43a1dfac, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 48906c60-0202-427a-9847-61a8ac04ea64, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 9552c7af-0a08-440d-96f3-9071f5c864f0, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 197cfc99-d2d1-49fd-9c3f-d434ed35e827, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.0948629379272461 seconds, retrying in 2.0s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 94440122-dd52-4d30-9370-b69453b993da, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: ecd39bec-b328-44f7-9bb4-34e31519dc80, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 93c22ca3-6780-4b5d-bd5d-51c3b9346706, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: c84e0b07-23f7-4ce9-a02c-eb89cb0f5e8a, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:log.py:22 Error in _llm_inference_task
+Traceback (most recent call last):
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 342, in _main_task
+    await self._run()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/fallback_adapter.py", line 402, in _run
+    raise APIConnectionError(
+livekit.agents._exceptions.APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.09045195579528809 seconds
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/utils/log.py", line 17, in async_fn_logs
+    return await fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/opentelemetry/util/_decorator.py", line 61, in async_wrapper
+    return await func(*args, **kwargs)  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/voice/generation.py", line 271, in _llm_inference_task
+    async for chunk in llm_node:
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/voice/agent.py", line 592, in llm_node
+    async for chunk in stream:
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 515, in __anext__
+    raise exc  # noqa: B904
+    ^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 279, in _traceable_main_task
+    await self._main_task()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 364, in _main_task
+    raise APIConnectionError(
+livekit.agents._exceptions.APIConnectionError: failed to generate LLM completion after 4 attempts (caused by APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.09045195579528809 seconds)
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 9bd4fb4e-4917-41a2-9076-7339d46138d7, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+____________________ test_account_details_need_verification ____________________
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x109ee9910>
+
+    async def _main_task(self) -> None:
+        self._llm_request_span = trace.get_current_span()
+    
+        for i in range(self._conn_options.max_retry + 1):
+            try:
+                with self._attempt_span() as attempt_span:
+                    attempt_span.set_attribute(trace_types.ATTR_RETRY_COUNT, i)
+                    # Reset per-attempt context ids; the monitor task populates
+                    # this as ChatChunks arrive.
+                    self._provider_request_ids = []
+                    try:
+>                       await self._run()
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:342: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x109ee9910>
+
+    async def _run(self) -> None:
+        start_time = time.time()
+    
+        all_failed = all(not llm_status.available for llm_status in self._fallback_adapter._status)
+        if all_failed:
+            logger.error("all LLMs are unavailable, retrying..")
+    
+        for i in self._fallback_adapter._llm_order():
+            llm = self._fallback_adapter._llm_instances[i]
+            llm_status = self._fallback_adapter._status[i]
+            if llm_status.available or all_failed:
+                self._fallback_adapter._attempt_id += 1
+                attempt_id = self._fallback_adapter._attempt_id
+                llm_status.selection_id = attempt_id
+                text_sent: str = ""
+                tool_calls_sent: list[str] = []
+                try:
+                    async for result in self._try_generate(llm=llm, check_recovery=False):
+                        if result.delta:
+                            if result.delta.content:
+                                text_sent += result.delta.content
+                            for tool_call in result.delta.tool_calls:
+                                tool_calls_sent.append(tool_call.name)
+    
+                        self._event_ch.send_nowait(result)
+    
+                    # Restore this selection after concurrent failures without outranking
+                    # a newer selection that has not failed.
+                    llm_status.selection_id = max(llm_status.selection_id, attempt_id)
+                    if self._fallback_adapter._sticky and not llm_status.available:
+                        llm_status.available = True
+                        self._fallback_adapter.emit(
+                            "llm_availability_changed",
+                            AvailabilityChangedEvent(llm=llm, available=True),
+                        )
+    
+                    # request-side attributes named the instance expected to serve; the
+                    # response side names the one that did (from `llm`, not the adapter:
+                    # concurrent requests may be served by different instances)
+                    response_attrs = {
+                        trace_types.ATTR_GEN_AI_RESPONSE_MODEL: llm.model,
+                        **_provider_attr(llm),
+                    }
+                    if self._llm_request_span is not None:
+                        self._llm_request_span.set_attributes(
+                            {
+                                trace_types.ATTR_FALLBACK_LABEL: llm.label,
+                                trace_types.ATTR_FALLBACK_INDEX: i,
+                                **response_attrs,
+                            }
+                        )
+                    self._caller_span.set_attributes(response_attrs)
+                    return
+                except Exception:  # exceptions already logged inside _try_generate
+                    llm_status.selection_id = 0
+                    if llm_status.available:
+                        llm_status.available = False
+                        self._fallback_adapter.emit(
+                            "llm_availability_changed",
+                            AvailabilityChangedEvent(llm=llm, available=False),
+                        )
+    
+                    if text_sent or tool_calls_sent:
+                        extra = {"text_sent": text_sent, "tool_calls_sent": tool_calls_sent}
+                        if not self._fallback_adapter._retry_on_chunk_sent:
+                            logger.error(
+                                f"{llm.label} failed after sending chunk, skip retrying. "
+                                "Set `retry_on_chunk_sent` to `True` to enable retrying after chunks are sent.",
+                                extra=extra,
+                            )
+                            raise
+    
+                        logger.warning(
+                            f"{llm.label} failed after sending chunk, retrying..",
+                            extra=extra,
+                        )
+    
+            self._try_recovery(llm)
+    
+>       raise APIConnectionError(
+            f"all LLMs failed ({[llm.label for llm in self._fallback_adapter._llm_instances]}) after {time.time() - start_time} seconds"  # noqa: E501
+        )
+E       livekit.agents._exceptions.APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.09143328666687012 seconds
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/fallback_adapter.py:402: APIConnectionError
+
+The above exception was the direct cause of the following exception:
+
+    async def test_account_details_need_verification():
+>       call, result = await first_turn(
+            "No, this is her husband. Is her membership still active?", DEMO_MEMBER_PHONE
+        )
+
+evals/test_behaviour.py:66: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+evals/test_behaviour.py:22: in first_turn
+    return call, await session.run(user_input=user_input)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/voice/run_result.py:186: in _await_impl
+    await asyncio.shield(self._done_fut)
+.venv/lib/python3.11/site-packages/livekit/agents/utils/log.py:17: in async_fn_logs
+    return await fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/opentelemetry/util/_decorator.py:61: in async_wrapper
+    return await func(*args, **kwargs)  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/voice/generation.py:271: in _llm_inference_task
+    async for chunk in llm_node:
+.venv/lib/python3.11/site-packages/livekit/agents/voice/agent.py:592: in llm_node
+    async for chunk in stream:
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:515: in __anext__
+    raise exc  # noqa: B904
+    ^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:279: in _traceable_main_task
+    await self._main_task()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x109ee9910>
+
+    async def _main_task(self) -> None:
+        self._llm_request_span = trace.get_current_span()
+    
+        for i in range(self._conn_options.max_retry + 1):
+            try:
+                with self._attempt_span() as attempt_span:
+                    attempt_span.set_attribute(trace_types.ATTR_RETRY_COUNT, i)
+                    # Reset per-attempt context ids; the monitor task populates
+                    # this as ChatChunks arrive.
+                    self._provider_request_ids = []
+                    try:
+                        await self._run()
+                    finally:
+                        if self._provider_request_ids:
+                            attempt_span.set_attribute(
+                                trace_types.ATTR_PROVIDER_REQUEST_IDS, self._provider_request_ids
+                            )
+                    return
+            except APIError as e:
+                # 499 (Client Closed Request) - close gracefully without raising
+                if isinstance(e, APIStatusError) and e.status_code == 499:
+                    return
+    
+                if not self._retry_on_chunk_sent and self._event_ch.output_sent:
+                    e.retryable = False
+    
+                retry_interval = self._conn_options._interval_for_retry(i)
+    
+                if self._conn_options.max_retry == 0 or not e.retryable:
+                    self._emit_error(e, recoverable=False)
+                    raise
+                elif i == self._conn_options.max_retry:
+                    self._emit_error(e, recoverable=False)
+>                   raise APIConnectionError(
+                        f"failed to generate LLM completion after {self._conn_options.max_retry + 1} attempts",  # noqa: E501
+                    ) from e
+E                   livekit.agents._exceptions.APIConnectionError: failed to generate LLM completion after 4 attempts (caused by APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.09143328666687012 seconds)
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:364: APIConnectionError
+------------------------------ Captured log call -------------------------------
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 98962665-bcb4-4244-baad-f8889e3127e5, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: caf24efd-8c9d-4e04-83a7-d0f0ab0507f9, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 7820b213-acb5-4b4a-823f-1581bd1cd537, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.16080307960510254 seconds, retrying in 0.1s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: fc08b1ce-58ef-4e6c-ae45-72223f35b6ba, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: bfd11e93-dabb-40c2-b8e3-5a14509962f0, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 045e9d6c-d31d-48fc-a7cd-843069379106, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.08410120010375977 seconds, retrying in 2.0s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 34ebb9e1-101e-4dfe-8412-8436e8801f87, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 39b1aa53-d30a-49f2-b2c1-7cedad01e3e5, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: bcc1b642-24cd-4952-9071-c33114595615, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 7894ec2b-4e85-4ba5-8164-ec9247f6153c, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.10041403770446777 seconds, retrying in 2.0s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: b91552a8-55d4-44b8-a1b4-f07fd3193100, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: cddf7cb2-0c6d-40b4-8799-4679a8618476, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: c7f3baa5-5d85-4957-8432-6ed4d8f6800e, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: bdd5785a-65d0-41a9-afb5-7f5fe3b8b379, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:log.py:22 Error in _llm_inference_task
+Traceback (most recent call last):
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 342, in _main_task
+    await self._run()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/fallback_adapter.py", line 402, in _run
+    raise APIConnectionError(
+livekit.agents._exceptions.APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.09143328666687012 seconds
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/utils/log.py", line 17, in async_fn_logs
+    return await fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/opentelemetry/util/_decorator.py", line 61, in async_wrapper
+    return await func(*args, **kwargs)  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/voice/generation.py", line 271, in _llm_inference_task
+    async for chunk in llm_node:
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/voice/agent.py", line 592, in llm_node
+    async for chunk in stream:
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 515, in __anext__
+    raise exc  # noqa: B904
+    ^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 279, in _traceable_main_task
+    await self._main_task()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 364, in _main_task
+    raise APIConnectionError(
+livekit.agents._exceptions.APIConnectionError: failed to generate LLM completion after 4 attempts (caused by APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.09143328666687012 seconds)
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 50bae2b6-6d8b-4716-9b9c-200a6580e273, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+___________________ test_out_of_area_caller_hears_a_kind_no ____________________
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x10a2aa4d0>
+
+    async def _main_task(self) -> None:
+        self._llm_request_span = trace.get_current_span()
+    
+        for i in range(self._conn_options.max_retry + 1):
+            try:
+                with self._attempt_span() as attempt_span:
+                    attempt_span.set_attribute(trace_types.ATTR_RETRY_COUNT, i)
+                    # Reset per-attempt context ids; the monitor task populates
+                    # this as ChatChunks arrive.
+                    self._provider_request_ids = []
+                    try:
+>                       await self._run()
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:342: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x10a2aa4d0>
+
+    async def _run(self) -> None:
+        start_time = time.time()
+    
+        all_failed = all(not llm_status.available for llm_status in self._fallback_adapter._status)
+        if all_failed:
+            logger.error("all LLMs are unavailable, retrying..")
+    
+        for i in self._fallback_adapter._llm_order():
+            llm = self._fallback_adapter._llm_instances[i]
+            llm_status = self._fallback_adapter._status[i]
+            if llm_status.available or all_failed:
+                self._fallback_adapter._attempt_id += 1
+                attempt_id = self._fallback_adapter._attempt_id
+                llm_status.selection_id = attempt_id
+                text_sent: str = ""
+                tool_calls_sent: list[str] = []
+                try:
+                    async for result in self._try_generate(llm=llm, check_recovery=False):
+                        if result.delta:
+                            if result.delta.content:
+                                text_sent += result.delta.content
+                            for tool_call in result.delta.tool_calls:
+                                tool_calls_sent.append(tool_call.name)
+    
+                        self._event_ch.send_nowait(result)
+    
+                    # Restore this selection after concurrent failures without outranking
+                    # a newer selection that has not failed.
+                    llm_status.selection_id = max(llm_status.selection_id, attempt_id)
+                    if self._fallback_adapter._sticky and not llm_status.available:
+                        llm_status.available = True
+                        self._fallback_adapter.emit(
+                            "llm_availability_changed",
+                            AvailabilityChangedEvent(llm=llm, available=True),
+                        )
+    
+                    # request-side attributes named the instance expected to serve; the
+                    # response side names the one that did (from `llm`, not the adapter:
+                    # concurrent requests may be served by different instances)
+                    response_attrs = {
+                        trace_types.ATTR_GEN_AI_RESPONSE_MODEL: llm.model,
+                        **_provider_attr(llm),
+                    }
+                    if self._llm_request_span is not None:
+                        self._llm_request_span.set_attributes(
+                            {
+                                trace_types.ATTR_FALLBACK_LABEL: llm.label,
+                                trace_types.ATTR_FALLBACK_INDEX: i,
+                                **response_attrs,
+                            }
+                        )
+                    self._caller_span.set_attributes(response_attrs)
+                    return
+                except Exception:  # exceptions already logged inside _try_generate
+                    llm_status.selection_id = 0
+                    if llm_status.available:
+                        llm_status.available = False
+                        self._fallback_adapter.emit(
+                            "llm_availability_changed",
+                            AvailabilityChangedEvent(llm=llm, available=False),
+                        )
+    
+                    if text_sent or tool_calls_sent:
+                        extra = {"text_sent": text_sent, "tool_calls_sent": tool_calls_sent}
+                        if not self._fallback_adapter._retry_on_chunk_sent:
+                            logger.error(
+                                f"{llm.label} failed after sending chunk, skip retrying. "
+                                "Set `retry_on_chunk_sent` to `True` to enable retrying after chunks are sent.",
+                                extra=extra,
+                            )
+                            raise
+    
+                        logger.warning(
+                            f"{llm.label} failed after sending chunk, retrying..",
+                            extra=extra,
+                        )
+    
+            self._try_recovery(llm)
+    
+>       raise APIConnectionError(
+            f"all LLMs failed ({[llm.label for llm in self._fallback_adapter._llm_instances]}) after {time.time() - start_time} seconds"  # noqa: E501
+        )
+E       livekit.agents._exceptions.APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.10684895515441895 seconds
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/fallback_adapter.py:402: APIConnectionError
+
+The above exception was the direct cause of the following exception:
+
+    async def test_out_of_area_caller_hears_a_kind_no():
+>       call, result = await first_turn("My AC died. I'm in an apartment in Brooklyn, 11215.")
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+evals/test_behaviour.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+evals/test_behaviour.py:22: in first_turn
+    return call, await session.run(user_input=user_input)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/voice/run_result.py:186: in _await_impl
+    await asyncio.shield(self._done_fut)
+.venv/lib/python3.11/site-packages/livekit/agents/utils/log.py:17: in async_fn_logs
+    return await fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/opentelemetry/util/_decorator.py:61: in async_wrapper
+    return await func(*args, **kwargs)  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/voice/generation.py:271: in _llm_inference_task
+    async for chunk in llm_node:
+.venv/lib/python3.11/site-packages/livekit/agents/voice/agent.py:592: in llm_node
+    async for chunk in stream:
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:515: in __anext__
+    raise exc  # noqa: B904
+    ^^^^^^^^^
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:279: in _traceable_main_task
+    await self._main_task()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <livekit.agents.llm.fallback_adapter.FallbackLLMStream object at 0x10a2aa4d0>
+
+    async def _main_task(self) -> None:
+        self._llm_request_span = trace.get_current_span()
+    
+        for i in range(self._conn_options.max_retry + 1):
+            try:
+                with self._attempt_span() as attempt_span:
+                    attempt_span.set_attribute(trace_types.ATTR_RETRY_COUNT, i)
+                    # Reset per-attempt context ids; the monitor task populates
+                    # this as ChatChunks arrive.
+                    self._provider_request_ids = []
+                    try:
+                        await self._run()
+                    finally:
+                        if self._provider_request_ids:
+                            attempt_span.set_attribute(
+                                trace_types.ATTR_PROVIDER_REQUEST_IDS, self._provider_request_ids
+                            )
+                    return
+            except APIError as e:
+                # 499 (Client Closed Request) - close gracefully without raising
+                if isinstance(e, APIStatusError) and e.status_code == 499:
+                    return
+    
+                if not self._retry_on_chunk_sent and self._event_ch.output_sent:
+                    e.retryable = False
+    
+                retry_interval = self._conn_options._interval_for_retry(i)
+    
+                if self._conn_options.max_retry == 0 or not e.retryable:
+                    self._emit_error(e, recoverable=False)
+                    raise
+                elif i == self._conn_options.max_retry:
+                    self._emit_error(e, recoverable=False)
+>                   raise APIConnectionError(
+                        f"failed to generate LLM completion after {self._conn_options.max_retry + 1} attempts",  # noqa: E501
+                    ) from e
+E                   livekit.agents._exceptions.APIConnectionError: failed to generate LLM completion after 4 attempts (caused by APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.10684895515441895 seconds)
+
+.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py:364: APIConnectionError
+------------------------------ Captured log call -------------------------------
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 531dc98d-623e-459d-8751-a2be05b0b4bc, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: ff856693-b0fb-4bb5-90ee-a7a6f2a61829, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 80b6fbb5-83ed-467e-8e66-acaeafa53481, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.142225980758667 seconds, retrying in 0.1s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 26c3f803-1b17-4304-b1af-993a818ba7fc, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 275ef645-7572-4fcd-bb8b-e9c2880fc7c1, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: bc7d94cd-8cc1-4f50-8350-bc20e203df33, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.0704503059387207 seconds, retrying in 2.0s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 74ea5548-0268-4ee0-9c08-3b28788895bd, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: f705c763-976a-4172-a8f8-934dabd8d286, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 16c0113e-6825-4cc3-a131-6dfc9aea8126, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 6c6833d8-9609-418c-ab80-e95c2e1caae8, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:370 failed to generate LLM completion: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.09404897689819336 seconds, retrying in 2.0s
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 526d9fe6-a533-4e75-8885-0ea8c5a30b81, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 0e157186-e3d2-453d-ac73-3e97cd99d037, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:fallback_adapter.py:328 all LLMs are unavailable, retrying..
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 0ea854b3-e6d7-42c5-b4c5-fe78881a6231, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:280 livekit.agents.inference.llm.LLM failed, switching to next LLM: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 8e76e156-02a5-45a7-a9f9-a162e5608e67, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+ERROR    livekit.agents:log.py:22 Error in _llm_inference_task
+Traceback (most recent call last):
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 342, in _main_task
+    await self._run()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/fallback_adapter.py", line 402, in _run
+    raise APIConnectionError(
+livekit.agents._exceptions.APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.10684895515441895 seconds
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/utils/log.py", line 17, in async_fn_logs
+    return await fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/opentelemetry/util/_decorator.py", line 61, in async_wrapper
+    return await func(*args, **kwargs)  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/voice/generation.py", line 271, in _llm_inference_task
+    async for chunk in llm_node:
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/voice/agent.py", line 592, in llm_node
+    async for chunk in stream:
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 515, in __anext__
+    raise exc  # noqa: B904
+    ^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 279, in _traceable_main_task
+    await self._main_task()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 364, in _main_task
+    raise APIConnectionError(
+livekit.agents._exceptions.APIConnectionError: failed to generate LLM completion after 4 attempts (caused by APIConnectionError: all LLMs failed (['livekit.agents.inference.llm.LLM', 'livekit.agents.inference.llm.LLM']) after 0.10684895515441895 seconds)
+WARNING  livekit.agents:llm.py:637 LLM request rate limited by inference gateway
+WARNING  livekit.agents:fallback_adapter.py:273 livekit.agents.inference.llm.LLM recovery failed: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: a56282fd-2e44-457d-a84c-cc1c529d4e34, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+=========================== short test summary info ============================
+FAILED evals/test_behaviour.py::test_dusty_first_use_smell_is_not_an_emergency
+FAILED evals/test_behaviour.py::test_repair_costs_are_not_estimated - livekit...
+FAILED evals/test_behaviour.py::test_account_details_need_verification - live...
+FAILED evals/test_behaviour.py::test_out_of_area_caller_hears_a_kind_no - liv...
+4 failed, 4 passed in 19.80s

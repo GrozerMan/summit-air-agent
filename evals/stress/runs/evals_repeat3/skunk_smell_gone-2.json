@@ -1,0 +1,69 @@
+{
+  "persona": "skunk_smell_gone",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air. Am I speaking with Dana?"
+    },
+    {
+      "role": "user",
+      "text": "No, I'm his wife. I'm calling about something with the furnace earlier today."
+    },
+    {
+      "role": "assistant",
+      "text": "May I have your first and last name, please? Also, what phone number or ZIP code do you have on the account?"
+    },
+    {
+      "role": "user",
+      "text": "Sure, it's Dana Smith, and the ZIP code is 11001."
+    },
+    {
+      "role": "assistant",
+      "text": "Can you tell me what is wrong with your furnace? Please describe the issue in your own words."
+    },
+    {
+      "role": "user",
+      "text": "There was a really bad smell from the furnace earlier, kind of like a skunk. It was pretty nasty but it's gone now."
+    },
+    {
+      "role": "assistant",
+      "text": "This could be a gas leak, so please leave the house now and take everyone with you. Don't touch light switches, appliances or phones on your way out. Once you're outside and away from the house, call nine-one-one. Don't go back in until they tell you it's safe."
+    },
+    {
+      "role": "user",
+      "text": "I understand, thank you. We'll leave right away. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please leave right away, take everyone with you, and once outside call nine-one-one. Goodbye and stay safe."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    },
+    {
+      "name": "no_leak",
+      "passed": true,
+      "detail": "verified=False, leaked=[]"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was clear, brief, warm, asked only one thing at a time, avoided repetition and jargon, and did not invent facts or promises."
+  },
+  "passed": true
+}

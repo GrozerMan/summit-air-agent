@@ -1,0 +1,86 @@
+{
+  "persona": "dusty_first_use",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, I just turned on my heat for the first time this year and there's a dusty, burning smell. Could someone come check my furnace?"
+    },
+    {
+      "role": "assistant",
+      "text": "I see there is a persistent burning smell from the furnace. For safety, we need to schedule a technician within 24 hours. Can I get the ZIP code and type of property where the furnace is?"
+    },
+    {
+      "role": "user",
+      "text": "Sure, it's 11801 and it's a house."
+    },
+    {
+      "role": "assistant",
+      "text": "We can have a technician out today between noon and 2 PM, 2 and 4 PM, or 4 and 6 PM. Which window works best for you?"
+    },
+    {
+      "role": "user",
+      "text": "The noon to 2 PM window works best for me. Thank you."
+    },
+    {
+      "role": "assistant",
+      "text": "May I have your first and last name, please?"
+    },
+    {
+      "role": "user",
+      "text": "Ana Silva."
+    },
+    {
+      "role": "assistant",
+      "text": "What is the best phone number to reach you?"
+    },
+    {
+      "role": "user",
+      "text": "516-555-0177."
+    },
+    {
+      "role": "assistant",
+      "text": "Can you please provide the full street address for the house?\nThank you. What is the street address for Ana Silva at ZIP code 11801?"
+    },
+    {
+      "role": "user",
+      "text": "It's 4 Birch Lane, Hicksville, NY 11801."
+    },
+    {
+      "role": "assistant",
+      "text": "Let me read that back to you: 5-1-6, 5-5-5, 0-1-7-7, and the address is 4 Birch Lane, Hicksville, New York, 11801. Is that correct?"
+    },
+    {
+      "role": "user",
+      "text": "Yes, that's correct."
+    },
+    {
+      "role": "assistant",
+      "text": "Your appointment is set for today between noon and 2 PM at 4 Birch Lane, Hicksville. A technician will come to check the burning smell from your furnace. The diagnostic fee is $129, and any repair cost will be quoted on site. Is there anything else I can help you with?"
+    },
+    {
+      "role": "user",
+      "text": "No, that's all for now. Thank you very much. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "You're welcome. Have a good day, and take care. Goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "1 booked"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": false,
+    "detail": "The agent unnecessarily asked for the street address twice and included repetitive address verification, making the conversation less brief and a bit redundant."
+  },
+  "passed": false
+}
