@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS appointments (
     contact_name    TEXT NOT NULL,
     contact_phone   TEXT NOT NULL,
     notes           TEXT NOT NULL DEFAULT '',
-    status          TEXT NOT NULL DEFAULT 'booked' CHECK (status IN ('booked', 'moved', 'cancelled')),
+    status          TEXT NOT NULL DEFAULT 'booked'
+                    CHECK (status IN ('booked', 'on_hold', 'moved', 'cancelled')),
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS appointments_slot ON appointments (county, day, arrival_window, pool, status);
@@ -99,7 +100,26 @@ class Store:
         self.conn.execute("PRAGMA foreign_keys = ON")
         if self.path != ":memory:":
             self.conn.execute("PRAGMA journal_mode = WAL")
+        self._migrate()
         self.conn.executescript(SCHEMA)
+
+    def _migrate(self) -> None:
+        """Databases made before 'on_hold' existed reject it; rebuild the table with the new CHECK."""
+        row = self.conn.execute("SELECT sql FROM sqlite_master WHERE name = 'appointments'").fetchone()
+        if row is None or "on_hold" in row[0]:
+            return
+        create = SCHEMA[SCHEMA.index("CREATE TABLE IF NOT EXISTS appointments") :]
+        create = create[: create.index(");") + 2].replace("IF NOT EXISTS appointments", "appointments_new")
+        # SQLite's recipe for changing a constraint: foreign keys off, copy, swap.
+        self.conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            with self.write_lock() as conn:
+                conn.execute(create)
+                conn.execute("INSERT INTO appointments_new SELECT * FROM appointments")
+                conn.execute("DROP TABLE appointments")
+                conn.execute("ALTER TABLE appointments_new RENAME TO appointments")
+        finally:
+            self.conn.execute("PRAGMA foreign_keys = ON")
 
     def close(self) -> None:
         self.conn.close()
@@ -169,7 +189,8 @@ class Store:
     def count_booked(self, county: str, day: date, pool: Pool, window: str | None = None) -> int:
         sql = (
             "SELECT count(*) FROM appointments "
-            "WHERE county = ? AND day = ? AND pool = ? AND status = 'booked'"
+            # A held appointment keeps its seat until the dispatcher releases it.
+            "WHERE county = ? AND day = ? AND pool = ? AND status IN ('booked', 'on_hold')"
         )
         params: list[Any] = [county, day.isoformat(), pool.value]
         if window is not None:
@@ -206,6 +227,22 @@ class Store:
 
     def set_appointment_status(self, appointment_id: int, status: str) -> None:
         self.conn.execute("UPDATE appointments SET status = ? WHERE id = ?", (status, appointment_id))
+
+    def mark_moved(self, appointment_id: int) -> bool:
+        """Booked -> moved, only if it's still booked. False if another call got there first."""
+        cur = self.conn.execute(
+            "UPDATE appointments SET status = 'moved' WHERE id = ? AND status = 'booked'", (appointment_id,)
+        )
+        return cur.rowcount == 1
+
+    def hold_appointment(self, appointment_id: int, reason: str) -> bool:
+        """Put a booked appointment on hold for the dispatcher. False if it wasn't booked."""
+        cur = self.conn.execute(
+            "UPDATE appointments SET status = 'on_hold', priority = 0, notes = ? || ' ' || notes "
+            "WHERE id = ? AND status = 'booked'",
+            (f"ON HOLD: {reason}.", appointment_id),
+        )
+        return cur.rowcount == 1
 
     def get_appointment(self, appointment_id: int) -> Appointment | None:
         row = self.conn.execute("SELECT * FROM appointments WHERE id = ?", (appointment_id,)).fetchone()

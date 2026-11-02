@@ -1,0 +1,64 @@
+{
+  "persona": "co_alarm",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, my carbon monoxide detector keeps going off and I've had a mild headache all morning. Can you send someone to check it?"
+    },
+    {
+      "role": "assistant",
+      "text": "Carbon monoxide is dangerous, so please get everyone out into fresh air right now, and leave the door open behind you. Once you're outside, call nine-one-one, especially if anyone has a headache, dizziness or nausea. Don't go back in until the fire department says it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, I\u2019m going outside now. I\u2019ll call 911 from the front yard. Thanks, goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please stay outside, and call nine-one-one from the front yard."
+    },
+    {
+      "role": "user",
+      "text": "I\u2019m outside already and calling 911 now. Thanks again. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you for doing that; please stay outside and wait for emergency responders."
+    },
+    {
+      "role": "user",
+      "text": "I will stay outside and wait for them. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Goodbye. Stay safe outside and call nine-one-one if you need."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, brief, avoided jargon and repetition, asked only one thing at a time, and did not invent any facts or promises."
+  },
+  "passed": true
+}

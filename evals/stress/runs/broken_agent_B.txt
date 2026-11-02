@@ -1,0 +1,47 @@
+LLM request rate limited by inference gateway
+failed to generate LLM completion: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 0b8ef374-0dc1-4cd5-a9dc-ace4fd10564c, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded, retrying in 0.1s
+LLM request rate limited by inference gateway
+failed to generate LLM completion: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: 081290ce-629d-41e8-a80e-02c8f2841f14, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded, retrying in 2.0s
+LLM request rate limited by inference gateway
+failed to generate LLM completion: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: da24de76-f2a2-4a33-87cf-96b563ed6823, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded, retrying in 2.0s
+LLM request rate limited by inference gateway
+Traceback (most recent call last):
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 342, in _main_task
+    await self._run()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/inference/llm.py", line 619, in _run
+    raise APIStatusError(
+livekit.agents._exceptions.APIStatusError: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: ac4a2ae4-4236-440a-ba83-c8e567872179, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/private/var/folders/9x/l058pzw962n8gl4fpq757zx00000gn/T/summit-broken-B/evals/run.py", line 58, in <module>
+    sys.exit(asyncio.run(main()))
+             ^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/asyncio/base_events.py", line 653, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/private/var/folders/9x/l058pzw962n8gl4fpq757zx00000gn/T/summit-broken-B/evals/run.py", line 42, in main
+    result = await run_persona(persona, judge=not args.no_judge)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/var/folders/9x/l058pzw962n8gl4fpq757zx00000gn/T/summit-broken-B/evals/harness.py", line 107, in run_persona
+    said = (await caller_llm.chat(chat_ctx=caller_ctx).collect()).text.strip()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 570, in collect
+    async for chunk in self:
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 515, in __anext__
+    raise exc  # noqa: B904
+    ^^^^^^^^^
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 279, in _traceable_main_task
+    await self._main_task()
+  File "/Users/lovishchugh/Desktop/summit-air-agent/.venv/lib/python3.11/site-packages/livekit/agents/llm/llm.py", line 364, in _main_task
+    raise APIConnectionError(
+livekit.agents._exceptions.APIConnectionError: failed to generate LLM completion after 4 attempts (caused by APIStatusError: message='Error code: 429', status_code=429, retryable=True, body=LLM token credit quota exceeded, category: MaxGatewayCredits, remaining_limit: 0, current_usage: 0, session_id: ac4a2ae4-4236-440a-ba83-c8e567872179, project_id: p_39rkfq1as9j, status: QuotaStatusExceeded)

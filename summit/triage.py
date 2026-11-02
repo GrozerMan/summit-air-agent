@@ -5,9 +5,9 @@ priority. Same facts, same priority, and every assessment lists the rules that
 fired so the office can see why a call was rated the way it was.
 
     P0  gas smell (even "gone now"), CO alarm or symptoms, smoke / sparks / flames.
-        Gas and CO also come from the caller's own words (hazard_words), so a
-        model that reports gas_smell=false for "smelled like a skunk" can't
-        keep the call out of P0.
+        All three also come from the caller's own words (hazard_words), so a
+        model that reports gas_smell=false for "smelled like a skunk", or never
+        reports the sparks at all, can't keep the call out of P0.
     P1  no heat with a vulnerable occupant or indoor temp at/below the threshold
         no cooling with a vulnerable occupant or indoor temp at/above the threshold
         persistent burning smell, active leak
@@ -78,14 +78,15 @@ class Assessment:
     ask_next: list[str] = field(default_factory=list)
 
 
-def assess(facts: Facts, cfg: dict[str, Any]) -> Assessment:
+def assess(facts: Facts, cfg: dict[str, Any], heard: set[str] | None = None) -> Assessment:
+    """`heard` is hazards already found in the caller's own words this call (the screen)."""
     rules = cfg["triage"]
 
-    heard = hazard_in(facts.description)
+    heard = set(heard or ()) | {hazard_in(facts.description)}
     hazards = [
-        ("gas", facts.gas_smell, heard == "gas", "gas smell reported"),
-        ("co", facts.co_alarm_or_symptoms, heard == "co", "carbon monoxide alarm or symptoms"),
-        ("fire", facts.smoke_sparks_or_flames, False, "smoke, sparks or flames"),
+        ("gas", facts.gas_smell, "gas" in heard, "gas smell reported"),
+        ("co", facts.co_alarm_or_symptoms, "co" in heard, "carbon monoxide alarm or symptoms"),
+        ("fire", facts.smoke_sparks_or_flames, "fire" in heard, "smoke, sparks or flames"),
     ]
     fired = [
         (kind, reason if reported else f"{reason} (caller's words)")
@@ -141,10 +142,12 @@ def safety_script(hazard: str, county: str | None, cfg: dict[str, Any]) -> str:
     """The exact words for a P0 call. Kept short; the caller should be leaving, not listening."""
     if hazard == "gas":
         utility = cfg["gas_utilities"].get(county or "")
+        # Without a location we can't name the utility, but every gas company runs a
+        # leak line, so the caller still hears that there's a second number to call.
         who_to_call = (
             f"call {EMERGENCY}, or {utility['name']} at {say_hotline(utility['phone'])}"
             if utility
-            else f"call {EMERGENCY}"
+            else f"call {EMERGENCY} or your gas company"
         )
         return (
             "This could be a gas leak, so please leave the house now and take everyone with you. "

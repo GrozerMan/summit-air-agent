@@ -95,6 +95,7 @@ class SummitAgent(Agent):
         doesn't decide whether it's an emergency, and it doesn't get to word the answer.
         """
         caller_words, said = caller_turn_to_screen(chat_ctx.items)
+        self.call.agent_said = said
         if caller_words is not None:
             try:
                 fixed = self.call.screen_caller_turn(caller_words, said_so_far=said)
@@ -104,6 +105,12 @@ class SummitAgent(Agent):
                 fixed = None
             if fixed:
                 return _speak(fixed)
+        else:
+            # The turn right after a tool. A booking or a move just went through, so the
+            # confirmation is spoken from the booking record instead of worded by the model.
+            confirmation = self.call.take_announcement()
+            if confirmation:
+                return _speak(confirmation)
 
         note = self.call.emergency_note()
         if note:
@@ -133,11 +140,13 @@ class SummitAgent(Agent):
         """Verify who's calling. Nothing about an account can be shared until this succeeds.
 
         Args:
-            confirmed_name: True if they said yes to the name in the greeting, False if they said no.
-            phone: The phone number on their account, if it's not the one they're calling from.
+            confirmed_name: True if they said yes to the name in the greeting, False if they said no
+                (report a "no" even if they don't want anything from the account).
+            phone: The phone number on their account. Required if they said no to the greeting name.
             first_name: Their first name. Only needed when several people share a number.
             last_name: Their last name.
-            zip_code: The ZIP code of the address on their account.
+            zip_code: The ZIP code of the address on their account. Required if they said no to
+                the greeting name.
         """
         args = dict(
             confirmed_name=confirmed_name,
@@ -257,8 +266,10 @@ class SummitAgent(Agent):
             zip_code: ZIP code of the service location.
             job_type: What the visit is for, e.g. "no heat", "AC repair", "tune-up".
             notes: Anything the technician should know: access, pets, equipment, what they've tried.
-            phone_read_back_confirmed: You read the number back and they said it's right.
-            address_read_back_confirmed: You read the address back and they said it's right.
+            phone_read_back_confirmed: You read the number back out loud and they said it's right.
+                The backend checks that you actually said it.
+            address_read_back_confirmed: You read the address back out loud and they said it's right.
+                The backend checks that you actually said it.
         """
         args = dict(
             option_id=option_id, first_name=first_name, last_name=last_name, phone=phone,

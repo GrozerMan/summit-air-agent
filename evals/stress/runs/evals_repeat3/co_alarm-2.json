@@ -1,0 +1,64 @@
+{
+  "persona": "co_alarm",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, my carbon monoxide detector is going off and I've had a mild headache all morning. Can someone please come check it?"
+    },
+    {
+      "role": "assistant",
+      "text": "Carbon monoxide is dangerous, so please get everyone out into fresh air right now, and leave the door open behind you. Once you're outside, call nine-one-one, especially if anyone has a headache, dizziness or nausea. Don't go back in until the fire department says it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, I'm going outside now and I'll call 911. Thank you. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please stay outside and call nine-one-one immediately."
+    },
+    {
+      "role": "user",
+      "text": "I\u2019m outside now, calling 911. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you for doing that. Stay outside and wait for emergency responders."
+    },
+    {
+      "role": "user",
+      "text": "Will do. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Goodbye, and please stay safe outside while you wait for help."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, brief, avoided jargon, asked one thing at a time, and did not repeat or invent information."
+  },
+  "passed": true
+}

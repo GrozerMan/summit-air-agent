@@ -39,7 +39,7 @@ cp .env.example .env.local            # add your LiveKit Cloud URL, key and secr
                                       #   (or: lk cloud auth && lk app env -w)
 uv run python agent.py download-files
 uv run python -m summit.seed --member-phone +1YOURCELL --member-name "Your Name"
-uv run pytest                         # 101 unit tests, no keys needed
+uv run pytest                         # unit tests, no keys needed
 ```
 
 A free LiveKit Cloud project covers agent minutes, LiveKit Inference credits (so no
@@ -64,16 +64,21 @@ create a dispatch rule (type Individual) that dispatches the agent named `summit
 
 ```bash
 uv run pytest                                      # triage, area, scheduling, guardrails, booking race, dashboard
-uv run python -m evals.run                         # 11 simulated callers end to end (needs LiveKit creds)
+uv run python -m evals.run                         # every simulated caller end to end (needs LiveKit creds)
 uv run python -m evals.run gas_smell messy_caller --repeat 3
 uv run pytest evals -m eval                        # targeted single-turn behaviour checks
 ```
 
 `evals.run` has an LLM play each caller against the real agent and prompt, then
 grades on what the backend recorded (booked? what priority? alert raised? booking
-moved? any account details leaked?) plus an LLM judge for tone. Every eval call
-happens at the same fixed time, so the calendar is identical from run to run.
-Transcripts land in `evals/results/`.
+moved?) and on what the caller actually heard: on a P0 call, the safety script
+word for word with nothing reassuring alongside it; for an unverified caller, none
+of the account's own details (street, town, ZIP, membership status, appointment
+day or window); on every call, no claim of a booking or a callback the records
+don't show. An LLM judge grades tone. Every eval call happens at the same fixed
+time, so the calendar is identical from run to run. Transcripts land in
+`evals/results/`. `uv run python -m evals.stress.grader_audit --no-judge` checks
+the grader itself: four deliberately wrong agents must fail, three correct ones pass.
 
 ## Changing the business rules
 
@@ -89,12 +94,12 @@ The brief leaves these open; each is a config value, not hard-coded.
 
 - **Service area:** Nassau, Suffolk and Westchester counties (NY), via a curated ZIP and town list. A ZIP that looks local but isn't on the list gets a "which town?" rather than a guess.
 - **Residential:** houses, condo/apartment units and 2-4 family homes. Businesses and building-wide plants are commercial: no booking, a callback lead for the office.
-- **Membership:** "Summit Comfort Club": no diagnostic fee, two tune-ups a year, priority capacity. Verified by caller ID plus name confirmation, or phone plus last name/ZIP.
+- **Membership:** "Summit Comfort Club": no diagnostic fee, two tune-ups a year, priority capacity. Verified by caller ID plus name confirmation, or phone plus last name/ZIP. A caller who says no to the greeting name needs the account phone, last name *and* ZIP, and can't be verified as the person they said they aren't. Three lookups per call at most.
 - **Prices quoted:** diagnostic $129 (members $0), tune-up $159, after-hours +$99, free replacement estimates. Repairs are never estimated by phone.
 - **Scheduling:** 2-hour arrival windows, 2 jobs per window per county, plus a daily emergency reserve (P1 only) and member-priority capacity. The calendar is a mock with a seeded, deterministic existing load; production would call ServiceTitan / Housecall Pro through the same `Store` surface.
-- **Hours:** office Mon-Fri 7-7, Sat 8-2. The agent answers 24/7 and alerts on-call for urgent calls after hours. Only urgent work is booked on Sundays.
+- **Hours:** office Mon-Fri 7-7, Sat 8-2. The agent answers 24/7; urgent calls after hours raise an urgent alert flagged for the on-call technician (dashboard, and Slack if configured; there's no SMS or phone paging yet). Only urgent work is booked on Sundays.
 - **Human transfer:** off by default (no second line); requests become honest callbacks. Set `HUMAN_TRANSFER_NUMBER` to enable live transfer during office hours (SIP REFER; your number's trunk has to allow call transfer).
-- **Gas emergency numbers:** National Grid (Long Island) 1-800-490-0045 and Con Edison (Westchester) 1-800-752-6633, from each utility's own page, always alongside 911.
+- **Gas emergency numbers:** National Grid (Long Island) 1-800-490-0045 and Con Edison (Westchester) 1-800-752-6633, from each utility's own page. The safety script always gives a second number alongside 911: the county's utility when we know where the caller is (checked address, caller ID, or a town or ZIP said in the same sentence as the hazard), otherwise "your gas company". The dispatcher alert carries the caller's own words.
 
 ## Environment variables
 

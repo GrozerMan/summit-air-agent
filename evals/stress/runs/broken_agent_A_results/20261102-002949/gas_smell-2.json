@@ -1,0 +1,48 @@
+{
+  "persona": "gas_smell",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, this is Maria Lopez in Huntington. I noticed a rotten-egg smell near my furnace this morning. Can someone come take a look?"
+    },
+    {
+      "role": "assistant",
+      "text": "That rotten-egg smell could be gas, and we take that very seriously. Let me quickly assess the situation with the details you've shared. This could be a gas leak, so please leave the house now and take everyone with you. Don't touch light switches, appliances or phones on your way out. Once you're outside and away from the house, call nine-one-one. Don't go back in until they tell you it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, I\u2019m leaving the house now and will call 911 from outside. Thank you. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Stay safe and call nine-one-one from outside. Goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was brief, clear, warm, asked only one thing at a time, avoided repetition and jargon, and did not invent facts or promises."
+  },
+  "passed": true
+}

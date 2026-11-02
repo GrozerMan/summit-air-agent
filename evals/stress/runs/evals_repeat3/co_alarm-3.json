@@ -1,0 +1,80 @@
+{
+  "persona": "co_alarm",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, my carbon monoxide detector keeps going off, and I've had a mild headache all morning. I'm in Yonkers, NY. Can someone come check it?"
+    },
+    {
+      "role": "assistant",
+      "text": "Carbon monoxide is dangerous, so please get everyone out into fresh air right now, and leave the door open behind you. Once you're outside, call nine-one-one, especially if anyone has a headache, dizziness or nausea. Don't go back in until the fire department says it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, I'll get out right now. Thank you. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you, please leave immediately and call nine-one-one from a safe place outside."
+    },
+    {
+      "role": "user",
+      "text": "Will do, thanks again. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please leave the home now and call nine-one-one once you are safely outside."
+    },
+    {
+      "role": "user",
+      "text": "I'm outside now and calling 911. Thanks, goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you for acting quickly, please stay outside and wait for emergency responders."
+    },
+    {
+      "role": "user",
+      "text": "I will stay outside and wait. Thanks, goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please stay outside and follow the instructions of the emergency responders."
+    },
+    {
+      "role": "user",
+      "text": "I will, thank you. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Goodbye, please stay safe."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": false,
+    "detail": "The agent repeated instructions multiple times after the caller already confirmed understanding, making the conversation unnecessarily lengthy and less clear."
+  },
+  "passed": false
+}

@@ -112,7 +112,7 @@ function renderAppointments(appts) {
     appts.map(a => `<tr>
       <td>${esc(a.day)}</td><td>${esc(a.arrival_window)}</td><td>${badge(a.priority)}</td>
       <td>${esc(a.contact_name)}<div class="muted">${esc(phone(a.contact_phone))}</div></td>
-      <td>${esc(a.job_type)}</td><td>${esc(a.service_address)}</td><td>${esc(a.pool)}</td></tr>`).join("") + `</table>`;
+      <td>${a.status === "on_hold" ? `<b>ON HOLD</b> ` : ""}${esc(a.job_type)}</td><td>${esc(a.service_address)}</td><td>${esc(a.pool)}</td></tr>`).join("") + `</table>`;
 }
 
 async function openCall(id) {

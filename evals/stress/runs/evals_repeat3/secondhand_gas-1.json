@@ -1,0 +1,56 @@
+{
+  "persona": "secondhand_gas",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, this is Priya Shah in Mineola. My husband thought he smelled gas near the furnace this morning. Can you send someone to check it?"
+    },
+    {
+      "role": "assistant",
+      "text": "This could be a gas leak, so please leave the house now and take everyone with you. Don't touch light switches, appliances or phones on your way out. Once you're outside and away from the house, call nine-one-one. Don't go back in until they tell you it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, we're leaving the house now. I'll call 911 from outside. Thank you. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please stay outside and wait for emergency responders. If you need anything else after, feel free to call us back."
+    },
+    {
+      "role": "user",
+      "text": "We will wait here. Thanks again. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you for your understanding. Stay safe outside and call nine-one-one if needed. Goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was clear, warm, brief, asked one thing at a time, did not repeat questions or use jargon, and made no invented promises."
+  },
+  "passed": true
+}

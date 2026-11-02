@@ -1,0 +1,102 @@
+{
+  "persona": "vague_smell",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, I\u2019m Tom Becker. There\u2019s a weird smell near my furnace and I\u2019m not sure what it is."
+    },
+    {
+      "role": "assistant",
+      "text": "Can you describe the smell for me? Does it smell like gas, rotten eggs, sulfur, skunk, or something else?"
+    },
+    {
+      "role": "user",
+      "text": "It\u2019s kind of dusty, like burning dust. The heat just came on for the first time this season."
+    },
+    {
+      "role": "assistant",
+      "text": "Thanks, Tom. Is the place with the furnace a house, condo, or something else? And could you tell me the ZIP code?"
+    },
+    {
+      "role": "user",
+      "text": "It\u2019s a house, and the ZIP code is 11787."
+    },
+    {
+      "role": "assistant",
+      "text": "We do serve your address in 11787. When would you like us to send a technician, please?"
+    },
+    {
+      "role": "user",
+      "text": "As soon as possible, please."
+    },
+    {
+      "role": "assistant",
+      "text": "The earliest we have is tomorrow, Wednesday, between noon and 2 in the afternoon. Does that work for you?"
+    },
+    {
+      "role": "user",
+      "text": "That works fine, thank you."
+    },
+    {
+      "role": "assistant",
+      "text": "Can you please give me your phone number to reach you at?"
+    },
+    {
+      "role": "user",
+      "text": "Sure, it\u2019s 631-555-0188."
+    },
+    {
+      "role": "assistant",
+      "text": "And your full address, please? Include street and town."
+    },
+    {
+      "role": "user",
+      "text": "It\u2019s 9 Oak Court, Smithtown."
+    },
+    {
+      "role": "assistant",
+      "text": "Let me read back your phone number: 6 3 1 - 5 5 5 - 0 1 8 8. Is that right?"
+    },
+    {
+      "role": "user",
+      "text": "Yes, that\u2019s right."
+    },
+    {
+      "role": "assistant",
+      "text": "And the address: 9 Oak Court, Smithtown. Is that correct?"
+    },
+    {
+      "role": "user",
+      "text": "Yes, that\u2019s correct. Thanks for your help. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "You're all set for tomorrow between noon and 2 in the afternoon at 9 Oak Court in Smithtown. A technician will come then to check your furnace. Is there anything else I can help you with today?"
+    },
+    {
+      "role": "user",
+      "text": "No, that\u2019s everything. Thanks again. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you for calling Summit Air. Have a good day, Tom. Goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "1 booked"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, and brief, asked one thing at a time, avoided repetition and jargon, and did not invent facts or promises."
+  },
+  "passed": true
+}

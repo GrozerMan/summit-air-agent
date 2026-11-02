@@ -1,0 +1,93 @@
+{
+  "persona": "skunk_smell_gone",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air. Am I speaking with Dana?"
+    },
+    {
+      "role": "user",
+      "text": "No, this is Dana, his wife. I was calling about his account."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you, Dana. Can you please provide the phone number on the account and your last name for verification?"
+    },
+    {
+      "role": "user",
+      "text": "Sure, the phone number is 555-123-4567 and our last name is Johnson."
+    },
+    {
+      "role": "assistant",
+      "text": "I couldn't find an account with those details, so we'll proceed as a new customer. What issue can I help you with today?"
+    },
+    {
+      "role": "user",
+      "text": "Earlier today there was a pretty bad smell coming from the furnace, kind of like a skunk. It\u2019s gone now, but it was really nasty."
+    },
+    {
+      "role": "assistant",
+      "text": "This could be a gas leak, so please leave the house now and take everyone with you. Don't touch light switches, appliances or phones on your way out. Once you're outside and away from the house, call nine-one-one, or National Grid at one, eight hundred, four nine zero, zero zero four five. Don't go back in until they tell you it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Okay, thank you for the help. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please leave the house immediately, go to a safe place outside, and call nine-one-one."
+    },
+    {
+      "role": "user",
+      "text": "I'm already outside now. Thank you. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you for your cooperation. Please stay outside and call nine-one-one if you haven't already."
+    },
+    {
+      "role": "user",
+      "text": "I have called them already. Thank you again. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "I'm glad you're safe outside now. If you need anything else later, just call us back."
+    },
+    {
+      "role": "user",
+      "text": "Will do, thanks. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Take care and stay safe outside. Goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    },
+    {
+      "name": "no_leak",
+      "passed": true,
+      "detail": "verified=False, leaked=[]"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": false,
+    "detail": "The agent repeated evacuation and safety instructions multiple times after the caller confirmed compliance, reducing conversational warmth and brevity."
+  },
+  "passed": false
+}

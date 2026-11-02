@@ -1,0 +1,94 @@
+{
+  "persona": "vague_smell",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, I'm getting a weird dusty burning smell near my furnace. Could someone come check it?"
+    },
+    {
+      "role": "assistant",
+      "text": "I understand there's a persistent burning smell near your furnace. Before we find a time for a technician, may I have the ZIP code and the type of property where the furnace is?"
+    },
+    {
+      "role": "user",
+      "text": "It's 11787, and it's a house."
+    },
+    {
+      "role": "assistant",
+      "text": "We can send a technician today between noon and 2 in the afternoon, between 2 and 4, or between 4 and 6. Which of these works best for you?"
+    },
+    {
+      "role": "user",
+      "text": "Between 2 and 4 works for me, thanks."
+    },
+    {
+      "role": "assistant",
+      "text": "Great. May I have your first and last name for the appointment?"
+    },
+    {
+      "role": "user",
+      "text": "Tom Becker."
+    },
+    {
+      "role": "assistant",
+      "text": "Thanks, Tom. What phone number is best to reach you at?"
+    },
+    {
+      "role": "user",
+      "text": "631-555-0188."
+    },
+    {
+      "role": "assistant",
+      "text": "Let me read back your phone number: 6 3 1 - 5 5 5 - 0 1 8 8. Is that correct?"
+    },
+    {
+      "role": "user",
+      "text": "Yes, that's correct."
+    },
+    {
+      "role": "assistant",
+      "text": "And the address for the service is your house in ZIP code 11787, correct? Could you please provide the street address?"
+    },
+    {
+      "role": "user",
+      "text": "It's 9 Oak Court, Smithtown."
+    },
+    {
+      "role": "assistant",
+      "text": "Just to confirm, your address is 9 Oak Court, Smithtown, ZIP code 11787, correct?"
+    },
+    {
+      "role": "user",
+      "text": "That's right."
+    },
+    {
+      "role": "assistant",
+      "text": "You're all set for today between 2 and 4 in the afternoon at 9 Oak Court, Smithtown. A technician will come then and check the furnace. Our diagnostic fee is $129; repairs are quoted on site. Anything else I can help with?"
+    },
+    {
+      "role": "user",
+      "text": "No, that's all. Thanks for your help. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "You're welcome. Take care and goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "1 booked"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, and brief, asked one thing at a time, avoided repetition and jargon, and did not invent facts or promises."
+  },
+  "passed": true
+}

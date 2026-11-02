@@ -44,12 +44,12 @@ summit/
 
 | Tool | Guardrail enforced in code |
 |---|---|
-| `lookup_customer` | Account details only after caller-ID name confirmation, or phone + last name/ZIP (+ first name for shared numbers) |
-| `assess_situation` | Deterministic P0-P3. Reported hazards stay reported and priority never goes down within a call. P0 raises a critical alert and returns the script to read word for word; P1 raises an urgent alert (and pages on-call after hours) |
-| `check_service_address` | ZIP/town → county; residential only; a local-looking ZIP that isn't on the list asks for the town instead of guessing |
-| `find_appointment_options` | Refuses before triage, on P0, out of area, for commercial, or before the property type is known. P1 must start within 24h and may use the emergency reserve; members may use member capacity; routine work never goes same-day. No P1 capacity → dispatcher alert + urgent callback |
-| `book_appointment` | Lists every missing field at once; phone and address read-backs required; ZIP must match the checked ZIP; option must have been offered on this call; the seat is re-checked inside `BEGIN IMMEDIATE` |
-| `change_appointment` | Verified callers only, their own appointment only; old window released in the same transaction |
+| `lookup_customer` | Account details only after caller-ID name confirmation, or phone + last name/ZIP (+ first name for shared numbers). After a "no" to the greeting name, caller ID stops counting: account phone + last name + ZIP, and the denied account stays closed. Three lookups per call |
+| `assess_situation` | Deterministic P0-P3. Reported hazards stay reported and priority never goes down within a call. P0 raises a critical alert (with the caller's words and any location they gave), puts any booking from this call on hold, and returns the script to read word for word; P1 raises an urgent alert (flagged for on-call after hours). A priority change voids times already offered |
+| `check_service_address` | ZIP/town → county; residential only; a local-looking ZIP that isn't on the list asks for the town instead of guessing. A new county, ZIP or property type voids times already offered |
+| `find_appointment_options` | Refuses before triage, on P0, out of area, for commercial, or before the property type is known. P1 must start within 24h and may use the emergency reserve; P2 within 72h; members may use member capacity; routine work never goes same-day. No P1 capacity → dispatcher alert + urgent callback; no P2 capacity → dispatcher alert + callback |
+| `book_appointment` | Lists every missing field at once; the agent must actually have said the phone digits and the house number and street (checked against its own transcript, not just the model's flags); ZIP must match the checked ZIP; the option must have been offered on this call for a new visit *and* still fit the call as it is now (county, residential, priority's time limit and capacity pool); the seat is re-checked inside `BEGIN IMMEDIATE`. The confirmation the caller hears is fixed text from the booking |
+| `change_appointment` | Verified callers only, their own appointment only, an option offered for that appointment; the old appointment is checked as still booked and released in the same transaction, so two calls can't both move it |
 | `request_callback` | Needs a valid number; urgent ones alert the dispatcher; due time is computed from office hours |
 | `transfer_to_human` | Live transfer only during office hours with a configured number, after the agent has said it's connecting them; a failed transfer becomes an urgent callback |
 | `get_pricing` | Config figures only; anything repair-shaped returns "don't estimate" |
@@ -63,7 +63,10 @@ summit/
    crashed worker loses nothing.
 6. **Hang-up.** The session's close event and the job's shutdown callback both run
    `finalize` (whichever comes first): the outcome, a technician summary and the
-   transcript are saved, and a triaged caller who didn't get booked gets a callback.
+   transcript are saved, and a triaged caller who didn't get booked gets a callback,
+   whether or not they got as far as giving an address. If the agent said something
+   was booked or that someone will call, and the records don't show it, the call is
+   flagged: an urgent alert, an urgent callback, and a REVIEW note.
 
 ## Data model (SQLite, `data/summit.db`)
 
@@ -84,9 +87,9 @@ job type → capacity → arrival window → notes).
 
 | Priority | Fires when | Effect |
 |---|---|---|
-| P0 safety | gas smell (even if "gone now"), CO alarm or symptoms, smoke/sparks/flames | No booking. Safety script (get out, then 911 / the county's gas utility). Critical alert. |
-| P1 urgent | no heat + (vulnerable occupant or ≤58°F inside); no cooling + (vulnerable or ≥85°F); persistent burning smell; active leak | Urgent alert (on-call after hours); a window starting within 24h, emergency reserve allowed |
-| P2 soon | no heat / no cooling otherwise; minor drip | Earliest window; asks for indoor temperature and who's home, since either can make it P1 |
+| P0 safety | gas smell (even if "gone now"), CO alarm or symptoms, smoke/sparks/flames, from the model's report or the caller's own words | No booking; a booking made earlier on the call goes on hold. Safety script (get out, then 911 and the county's gas utility, or "your gas company"). Critical alert. |
+| P1 urgent | no heat + (vulnerable occupant or ≤58°F inside); no cooling + (vulnerable or ≥85°F); persistent burning smell; active leak | Urgent alert (flagged for on-call after hours); a window starting within 24h, emergency reserve allowed |
+| P2 soon | no heat / no cooling otherwise; minor drip | A window starting within 72h; asks for indoor temperature and who's home, since either can make it P1 |
 | P3 routine | tune-ups, estimates, non-urgent repairs, first-use dusty smell | Any window from tomorrow |
 
 ## Capacity
@@ -120,4 +123,4 @@ dipping into a reserve. Only P1 work goes out on days the office is closed.
 | Slot taken between offer and booking | Re-checked under the DB write lock; agent apologizes and re-offers |
 | Slack down | Alert is still on the dashboard; Slack is posted from a background thread so the call never waits |
 | Transfer fails | Urgent callback instead, and the caller is told |
-| Model ignores a rule | The backend refuses; the prompt is not the safety net |
+| Model ignores a rule | For identity, priority, eligibility, scheduling, booking, read-backs and the booking confirmation, the backend refuses or speaks fixed text. Tone and how the model words a transfer request are still prompt-only |

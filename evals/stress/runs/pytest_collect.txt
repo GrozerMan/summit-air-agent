@@ -1,0 +1,173 @@
+tests/test_agent_tools.py::test_every_tool_is_exposed
+tests/test_agent_tools.py::test_tool_arguments_match_the_backend[lookup_customer]
+tests/test_agent_tools.py::test_tool_arguments_match_the_backend[check_service_address]
+tests/test_agent_tools.py::test_tool_arguments_match_the_backend[book_appointment]
+tests/test_agent_tools.py::test_tool_arguments_match_the_backend[request_callback]
+tests/test_agent_tools.py::test_tool_arguments_match_the_backend[get_pricing]
+tests/test_agent_tools.py::test_instructions_include_the_time_and_office_status
+tests/test_agent_tools.py::test_refusals_reach_the_model_as_tool_errors
+tests/test_agent_tools.py::test_gas_words_get_the_script_without_the_model
+tests/test_backend.py::test_caller_id_match_is_greeted_by_name_but_not_verified
+tests/test_backend.py::test_confirming_the_name_verifies
+tests/test_backend.py::test_nothing_is_revealed_without_verification
+tests/test_backend.py::test_phone_plus_last_name_verifies
+tests/test_backend.py::test_shared_phone_does_not_guess_a_name
+tests/test_backend.py::test_saying_no_to_the_name_drops_the_match
+tests/test_backend.py::test_priority_never_goes_down_within_a_call
+tests/test_backend.py::test_gas_mention_raises_critical_alert_with_script
+tests/test_backend.py::test_p1_after_hours_pages_on_call
+tests/test_backend.py::test_no_options_before_triage
+tests/test_backend.py::test_no_options_on_p0
+tests/test_backend.py::test_no_options_out_of_area
+tests/test_backend.py::test_commercial_caller_is_a_lead_not_a_booking
+tests/test_backend.py::test_booking_lists_every_missing_field
+tests/test_backend.py::test_booking_requires_both_read_backs
+tests/test_backend.py::test_booking_rejects_a_zip_that_was_not_checked
+tests/test_backend.py::test_booking_rejects_an_option_that_was_not_offered
+tests/test_backend.py::test_good_booking_goes_through_and_creates_the_customer
+tests/test_backend.py::test_unverified_booking_does_not_overwrite_the_account
+tests/test_backend.py::test_unverified_caller_gets_non_member_pricing
+tests/test_backend.py::test_slot_taken_between_offer_and_booking_is_re_offered
+tests/test_backend.py::test_reschedule_releases_the_old_window
+tests/test_backend.py::test_cannot_touch_someone_elses_appointment
+tests/test_backend.py::test_no_transfer_number_means_an_honest_callback
+tests/test_backend.py::test_transfer_only_while_the_office_is_open
+tests/test_backend.py::test_urgent_callback_is_due_in_30_minutes_and_alerts
+tests/test_backend.py::test_callback_needs_a_real_number
+tests/test_backend.py::test_repairs_are_never_estimated
+tests/test_backend.py::test_unbooked_triaged_call_becomes_a_callback
+tests/test_backend.py::test_every_tool_call_is_saved_as_it_happens
+tests/test_backend.py::test_out_of_area_town_without_a_zip_is_recorded
+tests/test_backend.py::test_turning_away_never_overwrites_a_safety_emergency
+tests/test_backend.py::test_gas_words_make_the_call_p0_before_the_model_answers
+tests/test_backend.py::test_p0_01_replayed_never_reaches_scheduling
+tests/test_backend.py::test_model_triage_alone_catches_p0_01
+tests/test_backend.py::test_smell_after_times_were_offered_voids_them
+tests/test_backend.py::test_no_rescheduling_during_an_emergency
+tests/test_backend.py::test_safety_script_is_read_once
+tests/test_backend.py::test_script_is_reread_if_the_model_paraphrased_it
+tests/test_backend.py::test_cannot_leave_gets_the_fixed_answer
+tests/test_backend.py::test_dusty_smell_turn_is_left_to_the_model
+tests/test_backend.py::test_emergency_note_after_p0
+tests/test_backend.py::test_unverified_caller_is_not_named_as_the_account_holder
+tests/test_backend.py::test_only_the_first_reply_to_a_caller_turn_is_screened
+tests/test_booking_race.py::test_last_seat_is_booked_exactly_once
+tests/test_dashboard.py::test_api_lists_calls_and_alerts
+tests/test_dashboard.py::test_call_detail_includes_transcript
+tests/test_dashboard.py::test_alerts_can_be_acknowledged
+tests/test_hazard_words.py::test_gas_words_are_caught[text0]
+tests/test_hazard_words.py::test_gas_words_are_caught[nasty skunk-like smell from furnace earlier but now gone]
+tests/test_hazard_words.py::test_gas_words_are_caught[rotten eggs earlier but it stopped]
+tests/test_hazard_words.py::test_gas_words_are_caught[It smelled like rotten egg in the basement]
+tests/test_hazard_words.py::test_gas_words_are_caught[There's a sulfur smell near the furnace]
+tests/test_hazard_words.py::test_gas_words_are_caught[kind of a sulphury smell]
+tests/test_hazard_words.py::test_gas_words_are_caught[My husband thought he smelled gas this morning]
+tests/test_hazard_words.py::test_gas_words_are_caught[it smells like gas]
+tests/test_hazard_words.py::test_gas_words_are_caught[No, it smells like gas]
+tests/test_hazard_words.py::test_gas_words_are_caught[I'm not sure, but it smells like propane]
+tests/test_hazard_words.py::test_gas_words_are_caught[not sure it smells like gas]
+tests/test_hazard_words.py::test_gas_words_are_caught[Doesn't that smell like gas?]
+tests/test_hazard_words.py::test_gas_words_are_caught[I don't think it's anything but there's a gas smell]
+tests/test_hazard_words.py::test_gas_words_are_caught[the gas smell is gone now]
+tests/test_hazard_words.py::test_gas_words_are_caught[I think we have a gas leak]
+tests/test_hazard_words.py::test_gas_words_are_caught[smells like the gas stove when you leave it on]
+tests/test_hazard_words.py::test_gas_words_are_caught[there's a smell by the gas meter]
+tests/test_hazard_words.py::test_gas_words_are_caught[a weird smell near the gas line]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[dusty burning smell, first time turning heat on this year]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[I need a tune-up on my gas furnace]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[there's a burning smell from my gas furnace]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[my gas bill is really high]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[it smells weird, it's a gas furnace]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[the furnace is making a banging noise]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[No, I don't smell gas]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[no gas smell, it's just dusty]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[it doesn't smell like gas at all]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[There's no smell of gas]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[I never smelled propane]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[Do you service gas water heaters?]
+tests/test_hazard_words.py::test_ordinary_calls_do_not_fire[]
+tests/test_hazard_words.py::test_sounding_co_alarm_is_caught[my carbon monoxide detector keeps going off]
+tests/test_hazard_words.py::test_sounding_co_alarm_is_caught[the CO alarm went off earlier]
+tests/test_hazard_words.py::test_sounding_co_alarm_is_caught[Isn't the CO alarm going off?]
+tests/test_hazard_words.py::test_co_without_an_alarm_sounding_does_not_fire[the CO detector is chirping]
+tests/test_hazard_words.py::test_co_without_an_alarm_sounding_does_not_fire[the CO detector isn't going off]
+tests/test_hazard_words.py::test_co_without_an_alarm_sounding_does_not_fire[should I buy a carbon monoxide detector]
+tests/test_hazard_words.py::test_cannot_leave[It's kinda dark outside. And I don't feel safe leaving.]
+tests/test_hazard_words.py::test_cannot_leave[I can't leave, my mom is in a wheelchair]
+tests/test_hazard_words.py::test_cannot_leave[I'm not going to leave]
+tests/test_hazard_words.py::test_cannot_leave[I can't get out of the house]
+tests/test_hazard_words.py::test_leaving_or_asking_is_not_cannot_leave[so I can't go back in until they say it's safe?]
+tests/test_hazard_words.py::test_leaving_or_asking_is_not_cannot_leave[Okay. I'm gonna hang up and do that.]
+tests/test_hazard_words.py::test_leaving_or_asking_is_not_cannot_leave[Okay. Is this really necessary?]
+tests/test_hazard_words.py::test_leaving_or_asking_is_not_cannot_leave[I'm leaving now]
+tests/test_hazard_words.py::test_hotline_is_spelled_for_tts
+tests/test_scheduling.py::test_routine_work_never_gets_same_day
+tests/test_scheduling.py::test_urgent_work_can_go_out_today
+tests/test_scheduling.py::test_windows_start_after_the_lead_time
+tests/test_scheduling.py::test_p1_uses_the_emergency_reserve_when_regular_is_full
+tests/test_scheduling.py::test_p2_cannot_touch_the_emergency_reserve
+tests/test_scheduling.py::test_member_capacity_is_for_members_only
+tests/test_scheduling.py::test_p1_never_offers_beyond_24_hours
+tests/test_scheduling.py::test_sunday_is_only_for_urgent_work
+tests/test_scheduling.py::test_simulated_load_is_deterministic
+tests/test_scheduling.py::test_booking_takes_a_seat
+tests/test_scheduling.py::test_window_phrasing
+tests/test_speech_and_area.py::test_phone_numbers_normalize[516-555-0142]
+tests/test_speech_and_area.py::test_phone_numbers_normalize[(516) 555 0142]
+tests/test_speech_and_area.py::test_phone_numbers_normalize[+1 516 555 0142]
+tests/test_speech_and_area.py::test_phone_numbers_normalize[five one six five five five oh one four two]
+tests/test_speech_and_area.py::test_phone_numbers_normalize[five one six, double five five, zero one four two]
+tests/test_speech_and_area.py::test_bad_phone_numbers_are_rejected[555 0142]
+tests/test_speech_and_area.py::test_bad_phone_numbers_are_rejected[516 555 01422 9]
+tests/test_speech_and_area.py::test_bad_phone_numbers_are_rejected[]
+tests/test_speech_and_area.py::test_bad_phone_numbers_are_rejected[None]
+tests/test_speech_and_area.py::test_bad_phone_numbers_are_rejected[011 555 0142 22]
+tests/test_speech_and_area.py::test_phone_is_read_back_in_groups
+tests/test_speech_and_area.py::test_spoken_zip
+tests/test_speech_and_area.py::test_known_zip_maps_to_county
+tests/test_speech_and_area.py::test_unlisted_zip_in_our_region_asks_for_town
+tests/test_speech_and_area.py::test_brooklyn_is_out_of_area
+tests/test_speech_and_area.py::test_garbled_zip_asks_to_repeat
+tests/test_speech_and_area.py::test_town_fallback_ignores_case_and_spacing
+tests/test_speech_and_area.py::test_homes_are_residential[single family house]
+tests/test_speech_and_area.py::test_homes_are_residential[condo]
+tests/test_speech_and_area.py::test_homes_are_residential[two-family home]
+tests/test_speech_and_area.py::test_homes_are_residential[my apartment]
+tests/test_speech_and_area.py::test_homes_are_residential[a 3 bedroom townhouse]
+tests/test_speech_and_area.py::test_businesses_are_commercial[restaurant]
+tests/test_speech_and_area.py::test_businesses_are_commercial[dental office building]
+tests/test_speech_and_area.py::test_businesses_are_commercial[rooftop unit on our store]
+tests/test_speech_and_area.py::test_businesses_are_commercial[the whole building's boiler]
+tests/test_speech_and_area.py::test_home_office_is_not_commercial
+tests/test_triage.py::test_hazards_are_p0[facts0]
+tests/test_triage.py::test_hazards_are_p0[facts1]
+tests/test_triage.py::test_hazards_are_p0[facts2]
+tests/test_triage.py::test_hazards_are_p0[facts3]
+tests/test_triage.py::test_no_heat_with_vulnerable_occupant_is_p1
+tests/test_triage.py::test_no_heat_at_threshold_is_p1
+tests/test_triage.py::test_no_heat_just_above_threshold_is_p2
+tests/test_triage.py::test_no_cooling_when_hot_inside_is_p1
+tests/test_triage.py::test_no_cooling_when_mild_is_p2
+tests/test_triage.py::test_persistent_burning_smell_is_p1
+tests/test_triage.py::test_active_leak_is_p1_and_minor_drip_is_p2
+tests/test_triage.py::test_first_use_dusty_smell_is_routine
+tests/test_triage.py::test_tune_up_is_routine
+tests/test_triage.py::test_p2_asks_for_temperature_and_occupants
+tests/test_triage.py::test_reasons_say_why
+tests/test_triage.py::test_reported_hazard_is_not_undone_by_later_answers
+tests/test_triage.py::test_later_answers_update_ordinary_facts
+tests/test_triage.py::test_gas_script_names_the_county_utility
+tests/test_triage.py::test_gas_script_without_county_still_says_911
+tests/test_triage.py::test_spoken_scripts_have_no_digits[Nassau-gas]
+tests/test_triage.py::test_spoken_scripts_have_no_digits[Nassau-co]
+tests/test_triage.py::test_spoken_scripts_have_no_digits[Nassau-fire]
+tests/test_triage.py::test_spoken_scripts_have_no_digits[Westchester-gas]
+tests/test_triage.py::test_spoken_scripts_have_no_digits[Westchester-co]
+tests/test_triage.py::test_spoken_scripts_have_no_digits[Westchester-fire]
+tests/test_triage.py::test_spoken_scripts_have_no_digits[None-gas]
+tests/test_triage.py::test_spoken_scripts_have_no_digits[None-co]
+tests/test_triage.py::test_spoken_scripts_have_no_digits[None-fire]
+tests/test_triage.py::test_description_with_gas_words_is_p0_even_when_the_model_says_no_gas
+tests/test_triage.py::test_dusty_first_use_description_stays_routine
+
+171 tests collected in 0.74s

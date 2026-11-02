@@ -5,6 +5,7 @@ that costs money or touches safety is checked here, and a refused action raises
 ActionRefused with a message telling the model exactly what to fix.
 """
 
+import re
 from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta
 from typing import Any
@@ -12,11 +13,12 @@ from typing import Any
 from summit import config
 from summit.models import Appointment, Customer, Membership, Priority
 from summit.notify import Notifier
-from summit.scheduling import Option, Scheduler, say_day, say_window
+from summit.scheduling import AppointmentChanged, Option, Scheduler, say_day, say_window
 from summit.service_area import AreaCheck, check_town, check_zip, property_kind
-from summit.speech import normalize_phone, normalize_zip, say_phone
+from summit.speech import normalize_phone, normalize_zip, say_phone, spoken_digits
 from summit.store import Store
-from summit.hazard_words import cannot_leave, hazard_in
+from summit.claims import false_claims
+from summit.hazard_words import cannot_leave, hazard_in, leaving
 from summit.triage import EMERGENCY, Assessment, Facts, assess, cannot_leave_script, safety_script
 
 
@@ -48,6 +50,33 @@ def caller_turn_to_screen(items: Iterable[object]) -> tuple[str | None, str]:
     return None, said
 
 
+# A P0 that only the word list raised can be a false alarm ("I asked if it smells like
+# gas and she said no"). It stays P0: undoing an emergency is the riskier mistake. The
+# caller who wanted a visit gets a person to arrange it instead of a dead end.
+_WORDS_ONLY_CALLBACK = (
+    "If the caller says there's no hazard at all and they still want a visit, don't argue and don't "
+    "book: offer a callback from the office to arrange it (request_callback)."
+)
+
+
+_REPAIR_WORDS = (
+    "repair", "fix", "part", "capacitor", "compressor", "motor", "fan", "coil", "blower", "igniter",
+    "ignitor", "thermostat", "sensor", "circuit board", "control board", "valve", "refrigerant", "freon",
+    "recharge", "leak", "how much will", "total",
+)  # fmt: skip
+_SYSTEM_WORDS = (
+    "new system", "new unit", "new furnace", "new boiler", "new ac", "new a/c", "new air conditioner",
+    "new heat pump", "whole system", "system replacement", "replace the system", "replace my system",
+    "replace the furnace", "replace my furnace", "replace the ac", "replace my ac", "install",
+    "replacement", "estimate",
+)  # fmt: skip
+_AFTER_HOURS_WORDS = (
+    "after hours", "after-hours", "weekend", "night", "tonight", "evening", "sunday", "saturday",
+    "holiday", "late",
+)  # fmt: skip
+_VISIT_WORDS = ("diagnos", "service call", "visit", "come out", "trip", "look at", "send someone")
+
+
 def _squash(text: str) -> str:
     return " ".join("".join(ch for ch in text.lower() if ch.isalnum() or ch.isspace()).split())
 
@@ -74,16 +103,34 @@ class CallSession:
 
         self.caller_match: Customer | None = None  # who caller ID suggests; not proof
         self.customer: Customer | None = None  # set only once identity is verified
+        # Who the caller said they are not. After a "no", caller ID stops counting as
+        # a factor, and this person's account stays closed for the rest of the call.
+        self.denied: Customer | None = None
+        self.caller_id_denied = False
+        self.lookup_attempts = 0
         self.facts = Facts()
         self.assessment: Assessment | None = None
+        self.heard: set[str] = set()  # hazards found in the caller's own words
+        self.hazard_place: dict[str, str] = {}  # ZIP/town said alongside the hazard, if any
+        self.p0_script: str | None = None  # the script as first read, so it's read once
+        self.caller_leaving = False
         self.area: AreaCheck | None = None
         self.property = "unknown"
         self.offered: dict[str, Option] = {}
+        # What each offered option was for: None for a new visit, or the appointment being moved.
+        self.offered_for: dict[str, int | None] = {}
         self.booked: list[int] = []
         self.callbacks: list[int] = []
         self.notes: list[str] = []
         self.outcome: str | None = None
         self.tool_log: list[dict[str, Any]] = []
+        # Fixed words for the agent's next turn, spoken instead of a model reply
+        # (a booking confirmation, so the model can't word one when nothing was booked).
+        self.announcement: str | None = None
+        self.false_claims: list[str] = []
+        # Everything the agent has said so far, updated before each model turn. Read-backs
+        # are checked against it rather than taken on the model's word.
+        self.agent_said = ""
 
     def now(self) -> datetime:
         return self._clock().astimezone(self.tz)
@@ -117,6 +164,8 @@ class CallSession:
             return f"Thanks for calling {company}. Am I speaking with {self.caller_match.first_name}?"
         return f"Thanks for calling {company}, you've reached our automated assistant. How can I help?"
 
+    MAX_LOOKUP_ATTEMPTS = 3
+
     def lookup_customer(
         self,
         confirmed_name: bool | None = None,
@@ -131,14 +180,40 @@ class CallSession:
         if confirmed_name and self.caller_match:
             return self._verify(self.caller_match)
         if confirmed_name is False:
+            # "No, I'm her son." Whoever this is, caller ID is now evidence of nothing,
+            # and the person they said they aren't stays unverifiable on this call.
+            self.denied = self.denied or self.caller_match
             self.caller_match = None
+            self.caller_id_denied = True
+            if not (phone or last_name or zip_code):
+                return (
+                    "Understood: they aren't the account holder. Don't share anything about that "
+                    "account. You can still help them as a new customer. If they have their own "
+                    "account, ask for the phone number on it, their last name and their ZIP code."
+                )
 
-        number = normalize_phone(phone) or self.caller_id
-        if not number or not (last_name or zip_code):
+        if self.caller_id_denied:
+            number = normalize_phone(phone)
+            if not (number and last_name and zip_code):
+                raise ActionRefused(
+                    "They said they aren't the person caller ID matches, so the number they're calling "
+                    "from doesn't count. To look up their own account, ask for the phone number on it, "
+                    "their last name and their ZIP code. Don't share anything until this succeeds."
+                )
+        else:
+            number = normalize_phone(phone) or self.caller_id
+            if not number or not (last_name or zip_code):
+                raise ActionRefused(
+                    "To look up an account, ask for the phone number on the account plus their "
+                    "last name or ZIP code."
+                )
+
+        if self.lookup_attempts >= self.MAX_LOOKUP_ATTEMPTS:
             raise ActionRefused(
-                "To look up an account, ask for the phone number on the account plus their "
-                "last name or ZIP code."
+                "Too many lookup attempts on this call; don't try again. Don't share anything about "
+                "any account. Help them as a new customer, or offer a callback from the office."
             )
+        self.lookup_attempts += 1
 
         candidates = self.store.customers_by_phone(number)
         if last_name:
@@ -149,6 +224,13 @@ class CallSession:
             wanted = first_name.strip().lower()
             candidates = [c for c in candidates if c.first_name.lower() == wanted]
 
+        if len(candidates) == 1 and self.denied and candidates[0].id == self.denied.id:
+            self.note(f"caller said they weren't {self.denied.full_name}, then gave that account's details")
+            return (
+                f"They told you earlier they aren't {self.denied.first_name}, so that account stays closed "
+                "on this call even with matching details. Don't share anything about it. Help them as a "
+                f"new customer, or {self.denied.first_name} can call us directly."
+            )
         if len(candidates) == 1:
             return self._verify(candidates[0])
         if len(candidates) > 1:
@@ -194,38 +276,101 @@ class CallSession:
 
     def assess_situation(self, facts: Facts) -> str:
         self.facts = self.facts.updated_with(facts)
-        fresh = assess(self.facts, self.cfg)
+        fresh = assess(self.facts, self.cfg, heard=self.heard)
         previous = self.assessment
 
         if previous and previous.priority <= fresh.priority:
             # Never lower priority mid-call. Keep asking the follow-ups, though.
             previous.ask_next = fresh.ask_next if fresh.priority == previous.priority else []
+            if previous.priority == fresh.priority == Priority.P0:
+                # The model confirming a hazard the screen heard turns "(caller's words)" into a report.
+                previous.reasons = fresh.reasons
+                return self.emergency_note() or ""
             return self._describe(previous, changed=False)
 
         self.assessment = fresh
         if fresh.priority == Priority.P0:
             return self._safety_emergency(fresh)
+        voided = self._void_offers() if previous else ""
         if fresh.priority == Priority.P1:
-            return self._urgent(fresh)
-        return self._describe(fresh, changed=previous is not None)
+            return self._urgent(fresh) + voided
+        return self._describe(fresh, changed=previous is not None) + voided
 
     def _safety_emergency(self, assessment: Assessment) -> str:
         script = self.safety_script()
-        who = self._who()
-        self.notifier.alert(self.call_id, "critical", f"P0 {', '.join(assessment.reasons)}: {who}")
+        what = ", ".join(assessment.reasons)
+        # A visit booked earlier on this call would send a technician to a reported gas
+        # leak with a routine ticket. Hold it; the dispatcher decides what happens to it.
+        held = [a for a in self.booked if self.store.hold_appointment(a, f"{what} after booking")]
+        alert = f"P0 {what}: {self._who()}"
+        if self.hazard_place and not self.area:
+            place = " ".join(v for k, v in self.hazard_place.items() if k in ("town", "zip"))
+            county = self.hazard_place.get("county")
+            alert += f". Location given: {place}" + (f" ({county} County)" if county else "")
+        if self.facts.description:
+            alert += f'. Caller said: "{self.facts.description[-300:]}"'
+        if held:
+            alert += f". Appointment {', '.join(f'#{a}' for a in held)} from this call put on hold"
+            self.note(f"appointment {', '.join(f'#{a}' for a in held)} put on hold after the hazard")
+        if self.customer:
+            others = [
+                a.id for a in self.store.upcoming_appointments(self.customer.id, self.now().date())
+                if a.id not in held
+            ]
+            if others:
+                alert += f". Customer also has upcoming appointment {', '.join(f'#{a}' for a in others)}"
+        self.notifier.alert(self.call_id, "critical", alert)
         self.outcome = "safety_emergency"
         # Times offered before the hazard came up are void.
-        self.offered.clear()
+        self._void_offers()
         return (
-            f"SAFETY EMERGENCY ({', '.join(assessment.reasons)}). The dispatcher has been alerted. "
+            f"SAFETY EMERGENCY ({what}). The dispatcher has been alerted. "
             f'Read this to the caller word for word: "{script}" '
             "Then stop. Don't collect booking details, and if they want to hang up and leave, let them."
         )
 
     def safety_script(self) -> str:
+        """The script for this P0 call, fixed the first time it's worked out, so a county
+        learned later doesn't make it count as "not read yet" and get read twice."""
         assert self.assessment and self.assessment.priority == Priority.P0
-        county = (self.area and self.area.county) or (self.caller_match and self.caller_match.county)
-        return safety_script(self.assessment.hazard or "", county or None, self.cfg)
+        if self.p0_script is None:
+            county = (
+                (self.area and self.area.county)
+                or (self.caller_match and self.caller_match.county)
+                or self.hazard_place.get("county")
+            )
+            self.p0_script = safety_script(self.assessment.hazard or "", county or None, self.cfg)
+        return self.p0_script
+
+    @property
+    def hazard_from_words_only(self) -> bool:
+        """P0 came only from the word list, never from the model's own report. The one case
+        where it might be a false alarm ("skunk under the porch")."""
+        return (
+            self.priority == Priority.P0
+            and self.assessment is not None
+            and all(r.endswith("(caller's words)") for r in self.assessment.reasons)
+        )
+
+    def _place_in(self, text: str) -> dict[str, str]:
+        """A ZIP or one of our towns said in the same sentence as the hazard."""
+        for sentence in re.split(r"(?<=[.!?])\s+", text):
+            if not hazard_in(sentence):
+                continue
+            place: dict[str, str] = {}
+            for name, county in self.cfg["service_area"]["towns"].items():
+                if re.search(rf"\b{re.escape(name)}\b", sentence, re.I):
+                    place.update(town=name, county=county)
+                    break
+            zip_match = re.search(r"\b\d{5}\b", sentence)
+            if zip_match:
+                place["zip"] = zip_match[0]
+                check = check_zip(zip_match[0], self.cfg)
+                if check.in_area and check.county:
+                    place["county"] = check.county
+            if place:
+                return place
+        return {}
 
     # The caller's own words
 
@@ -233,17 +378,18 @@ class CallSession:
         """Runs on each caller turn before the model answers it. Returns fixed words
         to say instead of a model reply, or None to let the model answer.
 
-        Gas or CO in the caller's words makes the call P0 here, whatever the model
-        would have reported. Once a call is P0, the safety script is read verbatim
+        Gas, CO or fire in the caller's words makes the call P0 here, whatever the
+        model would have reported. Once a call is P0, the safety script is read verbatim
         if it hasn't been yet (`said_so_far` is everything the agent has said), and
         a caller who says they can't get out hears a fixed answer instead of an
         improvised one.
         """
         hazard = hazard_in(text)
         if hazard and self.priority != Priority.P0:
-            field = {"gas": "gas_smell", "co": "co_alarm_or_symptoms"}[hazard]
-            result = self.assess_situation(Facts(**{field: True}, description=text.strip()))
-            self.log_tool("hazard_screen", {"heard": text, "hazard": hazard}, result)
+            self.heard.add(hazard)
+            self.hazard_place = self._place_in(text)
+            result = self.assess_situation(Facts(description=text.strip()))
+            self.log_tool("hazard_screen", {"heard": text, "hazard": hazard, **self.hazard_place}, result)
         if self.priority != Priority.P0:
             return None
 
@@ -252,33 +398,56 @@ class CallSession:
             return script
         if cannot_leave(text):
             assert self.assessment
+            self.caller_leaving = False
             self.note("caller said they can't leave; told to call 911 from inside")
             return cannot_leave_script(self.assessment.hazard or "")
+        if leaving(text):
+            self.caller_leaving = True
         return None
 
     def emergency_note(self) -> str | None:
-        """Standing orders for the model for the rest of a P0 call."""
+        """Standing orders for the model for the rest of a P0 call.
+
+        This used to tell the model to bring every answer back to leaving and calling
+        nine-one-one, so it repeated the script to callers who'd already said goodbye.
+        The script has been read; the note is about not undoing it.
+        """
         if self.priority != Priority.P0:
             return None
         assert self.assessment
-        return (
+        if self.caller_leaving:
+            return (
+                "SAFETY EMERGENCY: the caller has heard the safety instructions and is leaving. Say one "
+                'short goodbye, like "Okay. Please stay safe. Goodbye.", and end the call (end_call). '
+                "Don't repeat the instructions."
+            )
+        note = (
             f"SAFETY EMERGENCY on this call ({', '.join(self.assessment.reasons)}). The caller has "
-            "been told to leave and the dispatcher has been alerted. Don't ask for anything, don't "
-            "offer times and don't book. Keep any answer to one short sentence that comes back to "
-            f"leaving now and calling {EMERGENCY} from outside. Always say the number as "
+            "already heard the safety instructions and the dispatcher has been alerted. Don't repeat the "
+            "instructions unless they ask what to do or say they're staying inside. Don't ask for anything, "
+            "don't offer times and don't book. Answer questions in one short sentence. If they say they're "
+            "leaving or say goodbye, say one short goodbye and end the call (end_call). Say the number as "
             f'"{EMERGENCY}", never "911".'
         )
+        if self.hazard_from_words_only:
+            note += " " + _WORDS_ONLY_CALLBACK
+        return note
 
     def _urgent(self, assessment: Assessment) -> str:
         now = self.now()
         after_hours = not config.office_open(self.cfg, now)
-        note = " After hours: page on-call." if after_hours else ""
+        # A flag for whoever is on call, on the dashboard (and Slack if configured). Nothing pages
+        # a phone yet, so the caller isn't told anyone "has been alerted".
+        note = " After hours: flag for the on-call technician." if after_hours else ""
         self.notifier.alert(
             self.call_id, "urgent", f"P1 {', '.join(assessment.reasons)}: {self._who()}.{note}"
         )
         text = self._describe(assessment, changed=True)
         if after_hours:
-            text += " The office is closed, so the on-call technician has been alerted too."
+            text += (
+                " The office is closed; this has been flagged for the on-call technician. Don't promise "
+                "a call from them: book the window, or set an urgent callback if there isn't one."
+            )
         return text
 
     def _describe(self, assessment: Assessment, changed: bool) -> str:
@@ -304,6 +473,15 @@ class CallSession:
         town: str | None = None,
         property_type: str | None = None,
     ) -> str:
+        before = (self.area and (self.area.county, self.area.zip), self.property)
+        message = self._check_service_address(zip_code, town, property_type)
+        after = (self.area and (self.area.county, self.area.zip), self.property)
+        if after != before:
+            # Times offered for the old address or property don't apply to the new one.
+            message += self._void_offers()
+        return message
+
+    def _check_service_address(self, zip_code: str | None, town: str | None, property_type: str | None) -> str:
         if property_type:
             kind = property_kind(property_type)
             if kind != "unknown":
@@ -335,6 +513,17 @@ class CallSession:
             message += " Also confirm it's a home (house, condo or apartment), not a business."
         return message
 
+    def _void_offers(self) -> str:
+        """Forget times offered so far. Returns a line for the model if there were any."""
+        if not self.offered:
+            return ""
+        self.offered.clear()
+        self.offered_for.clear()
+        return (
+            " The times offered earlier no longer apply. Don't book them; call "
+            "find_appointment_options again if you get that far."
+        )
+
     def _set_outcome_unless_decided(self, outcome: str) -> None:
         # A booking or a safety emergency outranks "turned away"; the latest turn-away wins otherwise.
         if self.outcome in (None, "out_of_area", "commercial_lead"):
@@ -344,10 +533,13 @@ class CallSession:
 
     def _refuse_if_emergency(self) -> None:
         if self.priority == Priority.P0:
-            raise ActionRefused(
+            message = (
                 "This is a safety emergency. Don't book or move anything on this call; the caller "
                 "should be leaving the house."
             )
+            if self.hazard_from_words_only:
+                message += " " + _WORDS_ONLY_CALLBACK
+            raise ActionRefused(message)
 
     def find_appointment_options(self, reschedule_appointment_id: int | None = None) -> str:
         self._refuse_if_emergency()
@@ -363,12 +555,15 @@ class CallSession:
         if not options:
             if priority == Priority.P1:
                 return self._no_urgent_capacity()
+            if priority == Priority.P2 and reschedule_appointment_id is None:
+                return self._no_p2_capacity()
             return (
                 f"No openings in the next {self.cfg['scheduling']['horizon_days']} days. "
                 "Apologize and offer a callback from the office."
             )
 
         self.offered.update({o.option_id: o for o in options})
+        self.offered_for.update({o.option_id: reschedule_appointment_id for o in options})
         today = self.now().date()
         lines = []
         for option in options:
@@ -416,6 +611,23 @@ class CallSession:
             "Tell the caller exactly that."
         )
 
+    def _no_p2_capacity(self) -> str:
+        hours = self.cfg["triage"]["p2_within_hours"]
+        self.notifier.alert(
+            self.call_id, "urgent", f"No P2 capacity within {hours}h for {self._who()}. Needs a dispatcher."
+        )
+        if not self.callback_phone:
+            return (
+                f"Nothing is open in the next {hours} hours, and the dispatcher has been alerted. Ask for "
+                "the best number to reach them, then call request_callback so the office can fit them in."
+            )
+        due = self._add_callback(self.callback_phone, f"No P2 window within {hours}h; dispatcher to fit in", urgent=False)
+        return (
+            f"Nothing is open in the next {hours} hours. The dispatcher has been alerted, and the office will "
+            f"call {say_phone(self.callback_phone)} {self._say_due(due, False)} to fit them in. Tell the caller "
+            "exactly that."
+        )
+
     def book_appointment(
         self,
         option_id: str,
@@ -439,10 +651,19 @@ class CallSession:
             problems.append(
                 f"this call already booked appointment #{self.booked[-1]}; use change_appointment to move it"
             )
-        if option is None:
+        if option is None or self.offered_for.get(option_id) is not None:
             problems.append(
-                f"'{option_id}' wasn't offered on this call; use an option_id from find_appointment_options"
+                f"'{option_id}' wasn't offered for a new visit on this call; use an option_id from "
+                "find_appointment_options"
             )
+        else:
+            stale = self._stale_reason(option)
+            if stale:
+                self.offered.pop(option_id, None)
+                problems.append(
+                    f"the call changed since '{option_id}' was offered ({stale}); call "
+                    "find_appointment_options again and offer the new times"
+                )
         required = {
             "first name": first_name, "last name": last_name, "phone number": phone,
             "street address": address, "ZIP code": zip_code, "what the job is": job_type,
@@ -458,9 +679,9 @@ class CallSession:
                 f"ZIP {zip5 or zip_code} doesn't match the ZIP checked for the service area ({checked}); "
                 "confirm the address and run check_service_address again"
             )
-        if not phone_read_back_confirmed:
+        if not phone_read_back_confirmed or (phone_e164 and not self._read_back_phone(phone_e164)):
             problems.append("read the phone number back digit by digit and get a yes")
-        if not address_read_back_confirmed:
+        if not address_read_back_confirmed or not self._read_back_address(address):
             problems.append("read the full address back and get a yes")
         if problems:
             raise ActionRefused("Not booked yet: " + "; ".join(problems) + ".")
@@ -486,11 +707,41 @@ class CallSession:
         self.booked.append(appointment_id)
         self.outcome = "booked"
         today = self.now().date()
-        return (
-            f"Booked: appointment #{appointment_id}, {option.speakable(today)}, at {address.strip()}. "
-            f"{self._visit_price(job_type, option.after_hours)} "
-            "Confirm the day, the window and the address back to the caller." + self._membership_nudge()
+        self.announcement = (
+            f"You're booked. A technician will arrive {option.speakable(today)}, at {address.strip()}. "
+            f"{self._spoken_price(job_type, option.after_hours)} Is there anything else I can help with?"
         )
+        return (
+            f"Booked: appointment #{appointment_id}. This confirmation is being read to the caller word "
+            f'for word, so don\'t repeat it: "{self.announcement}"' + self._membership_nudge()
+        )
+
+    def _read_back_phone(self, phone_e164: str) -> bool:
+        """The agent actually said these ten digits, in any spoken form ("516-555-0142",
+        "five one six, five five five, oh one four two")."""
+        return phone_e164.removeprefix("+1") in spoken_digits(self.agent_said)
+
+    def _read_back_address(self, address: str) -> bool:
+        """The agent said the house number and the street name."""
+        words = re.findall(r"[a-z0-9]+", address.lower())
+        if not words:
+            return False
+        said = self.agent_said.lower()
+        number = words[0] if words[0][0].isdigit() else None
+        street = next((w for w in words[1:] if not w.isdigit() and len(w) > 1), None) if number else words[0]
+        if number and not re.search(rf"\b{number}\b", said):
+            return False
+        return street is None or re.search(rf"\b{re.escape(street)}", said) is not None
+
+    def _stale_reason(self, option: Option) -> str | None:
+        """Re-check an offered option against the call as it is now, not as it was when offered."""
+        if self.property != "residential":
+            return "the property isn't confirmed as a home"
+        if self.area is None or self.area.county != option.county:
+            where = f"{self.area.county} County" if self.area and self.area.county else "no checked address"
+            return f"that window is for {option.county} County and the address is now {where}"
+        assert self.assessment
+        return self.scheduler.still_fits(option, self.assessment.priority, self.is_member, self.now())
 
     def _customer_for_booking(
         self, first_name: str, last_name: str, phone: str, address: str, zip5: str, county: str
@@ -510,13 +761,44 @@ class CallSession:
         self._refuse_if_emergency()
         appointment = self._own_appointment(appointment_id)
         option = self.offered.get(option_id)
-        if option is None:
+        if option is None or self.offered_for.get(option_id) != appointment_id:
             raise ActionRefused(
-                f"'{option_id}' wasn't offered. Call find_appointment_options with "
-                f"reschedule_appointment_id={appointment_id} first."
+                f"'{option_id}' wasn't offered for appointment #{appointment_id}. Call "
+                f"find_appointment_options with reschedule_appointment_id={appointment_id} first."
+            )
+        stale = self.scheduler.still_fits(option, appointment.priority, self.is_member, self.now())
+        if stale or option.county != appointment.county:
+            self.offered.pop(option_id, None)
+            raise ActionRefused(
+                f"'{option_id}' no longer fits appointment #{appointment_id} ({stale or 'different county'}). "
+                f"Call find_appointment_options with reschedule_appointment_id={appointment_id} again."
             )
         assert self.customer
-        new_id = self.scheduler.move(
+        try:
+            new_id = self._move(appointment, option)
+        except AppointmentChanged:
+            raise ActionRefused(
+                f"Appointment #{appointment_id} was changed by another call a moment ago, so nothing was "
+                "moved. Tell the caller, and call lookup_customer to see their appointments as they are now."
+            ) from None
+        if new_id is None:
+            self._slot_taken(option, reschedule_appointment_id=appointment.id)
+
+        self.booked.append(new_id)
+        self.outcome = "rescheduled"
+        today = self.now().date()
+        self.announcement = (
+            f"Done. Your {appointment.job_type} is now {option.speakable(today)}, and the old time has "
+            "been released. Is there anything else I can help with?"
+        )
+        return (
+            f"Moved: appointment #{new_id}. This confirmation is being read to the caller word for word, "
+            f'so don\'t repeat it: "{self.announcement}"'
+        )
+
+    def _move(self, appointment: Appointment, option: Option) -> int | None:
+        assert self.customer
+        return self.scheduler.move(
             appointment.id,
             option,
             customer_id=self.customer.id,
@@ -527,17 +809,6 @@ class CallSession:
             contact_name=self.customer.full_name,
             contact_phone=self.customer.phone,
             notes=f"Moved from appointment #{appointment.id}.",
-        )
-        if new_id is None:
-            self._slot_taken(option)
-
-        self.booked.append(new_id)
-        self.outcome = "rescheduled"
-        today = self.now().date()
-        return (
-            f"Moved: the {appointment.job_type} is now {option.speakable(today)} "
-            f"(appointment #{new_id}), and the old time has been released. "
-            "Confirm the new time with the caller."
         )
 
     def _own_appointment(self, appointment_id: int) -> Appointment:
@@ -556,10 +827,10 @@ class CallSession:
             )
         return appointment
 
-    def _slot_taken(self, option: Option) -> None:
+    def _slot_taken(self, option: Option, reschedule_appointment_id: int | None = None) -> None:
         self.offered.pop(option.option_id, None)
         try:
-            alternatives = self.find_appointment_options()
+            alternatives = self.find_appointment_options(reschedule_appointment_id)
         except ActionRefused:
             alternatives = "Offer to look for other times."
         raise ActionRefused(
@@ -635,38 +906,56 @@ class CallSession:
     def get_pricing(self, item: str) -> str:
         text = item.lower()
         p = self.cfg["pricing"]
-        if any(w in text for w in ("estimate", "replacement", "new system", "new unit", "install")):
-            return "Replacement estimates are free."
-        if any(w in text for w in ("repair", "fix", "part", "compressor", "motor", "how much will", "total")):
-            return "Don't estimate repairs. The technician quotes on site before any work starts."
+        after_hours = any(w in text for w in _AFTER_HOURS_WORDS)
+        surcharge = f" Visits outside office hours add ${p['after_hours_surcharge']}." if after_hours else ""
+        # Repairs and parts first: "a replacement capacitor" is a repair, not a free estimate.
+        if any(w in text for w in _REPAIR_WORDS):
+            # No figure at all here: a "$129" next to "capacitor" gets relayed as the part's price.
+            return (
+                "Don't give a price for the repair or the part. The technician diagnoses it and quotes on "
+                "site before any work starts. If they ask what the visit costs, look up the diagnostic visit."
+            )
+        if any(w in text for w in _SYSTEM_WORDS):
+            return "Estimates for a new or replacement system are free."
         if "tune" in text or "maintenance" in text:
-            return f"A tune-up is ${p['tune_up']}. Members get two a year included."
-        if any(w in text for w in ("after", "weekend", "night", "evening", "sunday", "holiday")):
-            return f"After-hours visits add ${p['after_hours_surcharge']}."
+            return f"A tune-up is ${p['tune_up']}. Members get two a year included." + surcharge
         if any(w in text for w in ("member", "club", "plan")):
             benefits = ", ".join(self.cfg["membership"]["benefits"])
             return f"{self.cfg['membership']['name']}: {benefits}. The office can go over membership pricing."
-        if any(w in text for w in ("diagnos", "service call", "visit", "come out", "trip", "look at")):
-            if self.is_member:
-                return f"The diagnostic visit is free for members (${p['diagnostic']} otherwise)."
-            club = self.cfg["membership"]["name"]
-            return f"The diagnostic visit is ${p['diagnostic']}; it's free for {club} members."
+        if after_hours or any(w in text for w in _VISIT_WORDS):
+            # Always the base and the surcharge together, never "+$99" on its own.
+            return self._diagnostic_price() + surcharge
         return "Don't estimate repairs. The technician quotes on site before any work starts."
 
-    def _visit_price(self, job_type: str, after_hours: bool) -> str:
+    def _diagnostic_price(self) -> str:
+        p = self.cfg["pricing"]
+        if self.is_member:
+            return f"The diagnostic visit is free for members (${p['diagnostic']} otherwise)."
+        return f"The diagnostic visit is ${p['diagnostic']}; it's free for {self.cfg['membership']['name']} members."
+
+    def _spoken_price(self, job_type: str, after_hours: bool) -> str:
+        """The price line of the spoken confirmation, from config only."""
         p = self.cfg["pricing"]
         job = job_type.lower()
         if "tune" in job or "maintenance" in job:
-            price = "Tune-up: included in membership." if self.is_member else f"Tune-up: ${p['tune_up']}."
+            price = "The tune-up is included in your membership." if self.is_member else f"The tune-up is ${p['tune_up']}."
         elif "estimate" in job or "replacement" in job:
             price = "The estimate is free."
         elif self.is_member:
-            price = "No diagnostic fee as a member; any repair is quoted on site."
+            price = "As a member there's no diagnostic fee, and the technician will quote any repair before starting."
         else:
-            price = f"Diagnostic fee ${p['diagnostic']}; any repair is quoted on site."
+            price = (
+                f"The diagnostic visit is ${p['diagnostic']}, and the technician will quote any repair "
+                "before starting."
+            )
         if after_hours:
-            price += f" After-hours visit: +${p['after_hours_surcharge']}."
+            price += f" Because it's outside regular hours, there's an extra ${p['after_hours_surcharge']}."
         return price
+
+    def take_announcement(self) -> str | None:
+        """Fixed words for the next agent turn, once."""
+        text, self.announcement = self.announcement, None
+        return text
 
     def _membership_nudge(self) -> str:
         if self.is_member or (self.customer and self.customer.membership == Membership.LAPSED):
@@ -702,12 +991,12 @@ class CallSession:
         )
 
     def finalize(self, transcript: list[dict[str, Any]]) -> None:
-        """Called at hang-up. A triaged caller we didn't book still gets a callback."""
+        """Called at hang-up. A triaged caller we didn't book still gets a callback, whether
+        or not we got as far as their address: the callback goes to a phone, not a house."""
         needs_follow_up = (
             self.outcome in (None, "callback")
             and self.priority is not None
             and self.priority != Priority.P0
-            and self.area is not None
             and not self.booked
             and not self.callbacks
         )
@@ -721,9 +1010,30 @@ class CallSession:
                 self.outcome = "callback"
             else:
                 self.outcome = "abandoned"
+        self._flag_false_claims(transcript)
         if self.outcome is None:
             self.outcome = "info_only" if self.tool_log else "abandoned"
         self.save(transcript=transcript, ended=True)
+
+    def _flag_false_claims(self, transcript: list[dict[str, Any]]) -> None:
+        """The agent said it booked something, or that someone will call, and the records
+        say otherwise. The caller is now expecting a technician or a call that isn't coming,
+        so the office has to hear about it."""
+        said = " ".join(t.get("text", "") for t in transcript if t.get("role") == "assistant")
+        has_booking = bool(self.booked) or bool(
+            self.customer and self.store.upcoming_appointments(self.customer.id, self.now().date())
+        )
+        self.false_claims = false_claims(said, has_booking=has_booking, has_callback=bool(self.callbacks))
+        if not self.false_claims:
+            return
+        self.note("REVIEW: " + "; ".join(self.false_claims))
+        self.notifier.alert(
+            self.call_id,
+            "urgent",
+            f"Agent told {self._who()} something the records don't show: {self.false_claims[0]}. Call them back.",
+        )
+        if self.callback_phone and not self.callbacks:
+            self._add_callback(self.callback_phone, "Agent wrongly told the caller it was booked or arranged", urgent=True)
 
     def technician_summary(self) -> str:
         parts = []
@@ -761,6 +1071,7 @@ class CallSession:
             "appointments": self.booked,
             "callbacks": self.callbacks,
             "notes": self.notes,
+            "false_claims": self.false_claims,
             "outcome": self.outcome,
             "tools": self.tool_log,
         }

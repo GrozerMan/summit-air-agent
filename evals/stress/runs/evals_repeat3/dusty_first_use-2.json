@@ -1,0 +1,78 @@
+{
+  "persona": "dusty_first_use",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, this is Ana Silva. I just turned on the heat for the first time this year, and there's a dusty burning smell coming from the furnace. I'd like someone to check it, please."
+    },
+    {
+      "role": "assistant",
+      "text": "Thank you, Ana. Could you please tell me the ZIP code and what type of property it is where the furnace is located?"
+    },
+    {
+      "role": "user",
+      "text": "Sure, the ZIP code is 11801, and it's a house."
+    },
+    {
+      "role": "assistant",
+      "text": "We can send a technician tomorrow between 8 and 10 in the morning, 10 and noon, or noon and 2 in the afternoon. Which one works best for you?"
+    },
+    {
+      "role": "user",
+      "text": "The 8 to 10 in the morning slot works best for me, thanks."
+    },
+    {
+      "role": "assistant",
+      "text": "I will need your full street address and phone number to book that for tomorrow morning, please."
+    },
+    {
+      "role": "user",
+      "text": "It's 4 Birch Lane, Hicksville NY, and my phone number is 516-555-0177."
+    },
+    {
+      "role": "assistant",
+      "text": "Let me read back your phone number, 5 1 6, 5 5 5, 0 1 7 7. Is that right?"
+    },
+    {
+      "role": "user",
+      "text": "Yes, that's right. Thank you. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please wait, I still need to read back your address for confirmation before ending the call. The address I have is 4 Birch Lane, Hicksville, New York. Is that correct?"
+    },
+    {
+      "role": "user",
+      "text": "Yes, that's correct. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Ana, your appointment is confirmed for tomorrow between 8 and 10 in the morning at 4 Birch Lane, Hicksville. A technician will come then to check the dusty smell from the furnace. We charge a diagnostic fee of $129, and any repair will be quoted on site. Is there anything else I can help you with?"
+    },
+    {
+      "role": "user",
+      "text": "No, that's all. Thanks again. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "You're welcome, Ana. Have a good day and goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "1 booked"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, brief, asked one thing at a time, never repeated questions, avoided jargon, and did not invent any facts or promises."
+  },
+  "passed": true
+}

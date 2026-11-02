@@ -21,6 +21,10 @@ from summit.models import Pool, Priority
 from summit.store import Store
 
 
+class AppointmentChanged(Exception):
+    """The appointment being moved isn't booked any more (moved or cancelled meanwhile)."""
+
+
 def window_bounds(window: str) -> tuple[time, time]:
     start, end = window.split("-")
     return time.fromisoformat(start), time.fromisoformat(end)
@@ -87,29 +91,13 @@ class Scheduler:
         for when regular capacity has run out."""
         limit = limit or self.rules["options_to_offer"]
         now = now.astimezone(self.tz)
-        earliest_start = now + timedelta(minutes=self.rules["lead_minutes"])
-        if priority == Priority.P1:
-            latest_start = now + timedelta(hours=self.cfg["triage"]["p1_within_hours"])
-        else:
-            latest_start = now + timedelta(days=self.rules["horizon_days"])
-
-        pools = [Pool.REGULAR]
-        if is_member:
-            pools.append(Pool.MEMBER)
-        if priority == Priority.P1:
-            pools.append(Pool.EMERGENCY)
+        pools = self._pools(priority, is_member)
 
         options: list[Option] = []
         for offset in range(self.rules["horizon_days"] + 1):
             day = now.date() + timedelta(days=offset)
-            if priority == Priority.P3 and day == now.date():
-                continue
-            # Only urgent work goes out on days the office is closed.
-            if priority != Priority.P1 and config.office_hours(self.cfg, day) is None:
-                continue
             for window in self.rules["windows"]:
-                start = datetime.combine(day, window_bounds(window)[0], tzinfo=self.tz)
-                if start < earliest_start or start >= latest_start:
+                if not self._window_fits(day, window, priority, now):
                     continue
                 pool = next((p for p in pools if self.seats_left(county, day, window, p) > 0), None)
                 if pool is None:
@@ -118,6 +106,42 @@ class Scheduler:
                 if len(options) == limit:
                     return options
         return options
+
+    def still_fits(self, option: Option, priority: Priority, is_member: bool, now: datetime) -> str | None:
+        """Why an option offered earlier on the call no longer fits the call as it is now,
+        or None if it still does. Seats are re-checked separately, under the write lock."""
+        if option.pool not in self._pools(priority, is_member):
+            return f"it came from {option.pool.value} capacity, which a {priority.label} call can't use"
+        if not self._window_fits(option.day, option.window, priority, now.astimezone(self.tz)):
+            limit = self.latest_start(priority, now) - now
+            hours = int(limit.total_seconds() // 3600)
+            return f"a {priority.label} call has to start within {hours} hours, on a day this kind of work goes out"
+        return None
+
+    def latest_start(self, priority: Priority, now: datetime) -> datetime:
+        if priority == Priority.P1:
+            return now + timedelta(hours=self.cfg["triage"]["p1_within_hours"])
+        if priority == Priority.P2:
+            return now + timedelta(hours=self.cfg["triage"]["p2_within_hours"])
+        return now + timedelta(days=self.rules["horizon_days"])
+
+    def _pools(self, priority: Priority, is_member: bool) -> list[Pool]:
+        pools = [Pool.REGULAR]
+        if is_member:
+            pools.append(Pool.MEMBER)
+        if priority == Priority.P1:
+            pools.append(Pool.EMERGENCY)
+        return pools
+
+    def _window_fits(self, day: date, window: str, priority: Priority, now: datetime) -> bool:
+        if priority == Priority.P3 and day == now.date():
+            return False
+        # Only urgent work goes out on days the office is closed.
+        if priority != Priority.P1 and config.office_hours(self.cfg, day) is None:
+            return False
+        start = datetime.combine(day, window_bounds(window)[0], tzinfo=self.tz)
+        earliest = now + timedelta(minutes=self.rules["lead_minutes"])
+        return earliest <= start < self.latest_start(priority, now)
 
     def seats_left(self, county: str, day: date, window: str, pool: Pool) -> int:
         if pool == Pool.REGULAR:
@@ -154,19 +178,23 @@ class Scheduler:
             )
 
     def move(self, appointment_id: int, option: Option, **appointment: Any) -> int | None:
-        """Book the new window and release the old one in the same transaction."""
+        """Book the new window and release the old one in the same transaction.
+
+        The old appointment's status is checked under the lock too: two calls moving the
+        same appointment at once used to both pass the check outside it and both insert.
+        """
         with self.store.write_lock():
             if self.seats_left(option.county, option.day, option.window, option.pool) <= 0:
                 return None
-            new_id = self.store.insert_appointment(
+            if not self.store.mark_moved(appointment_id):
+                raise AppointmentChanged(appointment_id)
+            return self.store.insert_appointment(
                 county=option.county,
                 day=option.day,
                 window=option.window,
                 pool=option.pool,
                 **appointment,
             )
-            self.store.set_appointment_status(appointment_id, "moved")
-            return new_id
 
     def _option(self, county: str, day: date, window: str, pool: Pool) -> Option:
         start, end = window_bounds(window)

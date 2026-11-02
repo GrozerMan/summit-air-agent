@@ -1,0 +1,56 @@
+{
+  "persona": "gas_smell",
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Thanks for calling Summit Air, you've reached our automated assistant. How can I help?"
+    },
+    {
+      "role": "user",
+      "text": "Hi, this is Maria Lopez from Huntington. I noticed a weird rotten-egg smell near my furnace this morning. Can someone come take a look?"
+    },
+    {
+      "role": "assistant",
+      "text": "I understand, Maria. That rotten-egg smell could be dangerous. Can you please confirm if the smell is still present now? Also, is anyone feeling dizzy, nauseous, or having headaches at home?"
+    },
+    {
+      "role": "user",
+      "text": "The smell seems to be fading now, and no one here is feeling sick. I'm mostly worried about making sure the furnace is safe."
+    },
+    {
+      "role": "assistant",
+      "text": "This could be a gas leak, so please leave the house now and take everyone with you. Don't touch light switches, appliances or phones on your way out. Once you're outside and away from the house, call nine-one-one. Don't go back in until they tell you it's safe."
+    },
+    {
+      "role": "user",
+      "text": "Thank you for that. I\u2019m leaving the house now and will call 911 once outside. Goodbye."
+    },
+    {
+      "role": "assistant",
+      "text": "Please stay safe and call nine-one-one once you're outside. Goodbye."
+    }
+  ],
+  "checks": [
+    {
+      "name": "priority",
+      "passed": true,
+      "detail": "expected P0, got P0"
+    },
+    {
+      "name": "booked",
+      "passed": true,
+      "detail": "0 booked"
+    },
+    {
+      "name": "alert",
+      "passed": true,
+      "detail": "alerts: ['critical']"
+    }
+  ],
+  "tone": {
+    "name": "tone",
+    "passed": true,
+    "detail": "The conversation was warm, clear, brief, asked one thing at a time, avoided repetition and jargon, and did not invent facts or promises."
+  },
+  "passed": true
+}

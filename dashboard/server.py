@@ -22,7 +22,7 @@ QUERIES = {
     "/api/callbacks": "SELECT * FROM callbacks WHERE status = 'open' ORDER BY urgent DESC, due_at",
     "/api/appointments": (
         "SELECT a.*, c.first_name || ' ' || c.last_name AS customer FROM appointments a "
-        "JOIN customers c ON c.id = a.customer_id WHERE a.status = 'booked' "
+        "JOIN customers c ON c.id = a.customer_id WHERE a.status IN ('booked', 'on_hold') "
         "ORDER BY a.day, a.arrival_window"
     ),
     "/api/calls": (

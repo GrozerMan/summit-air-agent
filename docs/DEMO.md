@@ -24,10 +24,13 @@ Each call shows something different. Keep the dashboard on screen.
 1. **Member, urgent.** From your cell: confirm your name, "no heat, my mother's
    82 and it's 60 in here". Watch it go P1, offer a same-day window, read back the
    address and book. The dashboard shows the urgent alert and the booking.
-2. **Safety.** "I smell gas near the furnace, it's faint now." The safety script
-   with the county's gas utility, no booking, a critical alert on the dashboard.
+2. **Safety.** From your cell: "I smell gas near the furnace, it's faint now." The
+   safety script with the county's gas utility (from another phone, say the town in
+   the same sentence, or it says "your gas company"), no booking, a critical alert
+   with your words on the dashboard.
 3. **Routine, new caller.** From another phone (or `console --text`): a tune-up.
-   Same-day isn't offered; read-backs are enforced; one mention of the club.
+   Same-day isn't offered; the booking is refused until the agent has actually read
+   the number and address back; the confirmation is fixed text; one mention of the club.
 4. **Edges.** A restaurant (callback lead), a Brooklyn ZIP (kind no), "can I talk
    to a person" (honest callback, because no transfer line is configured).
 5. **Reschedule.** From your cell: "I need to move my tune-up". The old window is
