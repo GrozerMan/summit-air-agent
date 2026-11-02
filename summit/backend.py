@@ -5,7 +5,7 @@ that costs money or touches safety is checked here, and a refused action raises
 ActionRefused with a message telling the model exactly what to fix.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -16,11 +16,40 @@ from summit.scheduling import Option, Scheduler, say_day, say_window
 from summit.service_area import AreaCheck, check_town, check_zip, property_kind
 from summit.speech import normalize_phone, normalize_zip, say_phone
 from summit.store import Store
-from summit.triage import Assessment, Facts, assess, safety_script
+from summit.hazard_words import cannot_leave, hazard_in
+from summit.triage import EMERGENCY, Assessment, Facts, assess, cannot_leave_script, safety_script
 
 
 class ActionRefused(Exception):
     """The backend won't do what the model asked. The message says what's missing."""
+
+
+def caller_turn_to_screen(items: Iterable[object]) -> tuple[str | None, str]:
+    """From the chat history about to go to the model: the caller's latest words, if
+    this is the first reply to them, and everything the agent has said so far.
+
+    After a tool call the history ends in tool output rather than the caller's
+    message; that turn was already screened, so there's nothing new to check.
+    Duck-typed on LiveKit's chat items (type, role, text_content).
+    """
+    items = list(items)
+    said = " ".join(
+        i.text_content or ""
+        for i in items
+        if getattr(i, "type", None) == "message" and getattr(i, "role", None) == "assistant"
+    )
+    for item in reversed(items):
+        kind, role = getattr(item, "type", None), getattr(item, "role", None)
+        if kind == "message" and role == "user":
+            return item.text_content or "", said
+        if (kind == "message" and role == "assistant") or kind in ("function_call", "function_call_output"):
+            return None, said
+        # System notes, handoffs and config updates aren't a reply; keep looking.
+    return None, said
+
+
+def _squash(text: str) -> str:
+    return " ".join("".join(ch for ch in text.lower() if ch.isalnum() or ch.isspace()).split())
 
 
 class CallSession:
@@ -181,15 +210,63 @@ class CallSession:
         return self._describe(fresh, changed=previous is not None)
 
     def _safety_emergency(self, assessment: Assessment) -> str:
-        county = (self.area and self.area.county) or (self.caller_match and self.caller_match.county)
-        script = safety_script(assessment.hazard or "", county or None, self.cfg)
+        script = self.safety_script()
         who = self._who()
         self.notifier.alert(self.call_id, "critical", f"P0 {', '.join(assessment.reasons)}: {who}")
         self.outcome = "safety_emergency"
+        # Times offered before the hazard came up are void.
+        self.offered.clear()
         return (
             f"SAFETY EMERGENCY ({', '.join(assessment.reasons)}). The dispatcher has been alerted. "
             f'Read this to the caller word for word: "{script}" '
             "Then stop. Don't collect booking details, and if they want to hang up and leave, let them."
+        )
+
+    def safety_script(self) -> str:
+        assert self.assessment and self.assessment.priority == Priority.P0
+        county = (self.area and self.area.county) or (self.caller_match and self.caller_match.county)
+        return safety_script(self.assessment.hazard or "", county or None, self.cfg)
+
+    # The caller's own words
+
+    def screen_caller_turn(self, text: str, said_so_far: str = "") -> str | None:
+        """Runs on each caller turn before the model answers it. Returns fixed words
+        to say instead of a model reply, or None to let the model answer.
+
+        Gas or CO in the caller's words makes the call P0 here, whatever the model
+        would have reported. Once a call is P0, the safety script is read verbatim
+        if it hasn't been yet (`said_so_far` is everything the agent has said), and
+        a caller who says they can't get out hears a fixed answer instead of an
+        improvised one.
+        """
+        hazard = hazard_in(text)
+        if hazard and self.priority != Priority.P0:
+            field = {"gas": "gas_smell", "co": "co_alarm_or_symptoms"}[hazard]
+            result = self.assess_situation(Facts(**{field: True}, description=text.strip()))
+            self.log_tool("hazard_screen", {"heard": text, "hazard": hazard}, result)
+        if self.priority != Priority.P0:
+            return None
+
+        script = self.safety_script()
+        if _squash(script) not in _squash(said_so_far):
+            return script
+        if cannot_leave(text):
+            assert self.assessment
+            self.note("caller said they can't leave; told to call 911 from inside")
+            return cannot_leave_script(self.assessment.hazard or "")
+        return None
+
+    def emergency_note(self) -> str | None:
+        """Standing orders for the model for the rest of a P0 call."""
+        if self.priority != Priority.P0:
+            return None
+        assert self.assessment
+        return (
+            f"SAFETY EMERGENCY on this call ({', '.join(self.assessment.reasons)}). The caller has "
+            "been told to leave and the dispatcher has been alerted. Don't ask for anything, don't "
+            "offer times and don't book. Keep any answer to one short sentence that comes back to "
+            f"leaving now and calling {EMERGENCY} from outside. Always say the number as "
+            f'"{EMERGENCY}", never "911".'
         )
 
     def _urgent(self, assessment: Assessment) -> str:
@@ -265,7 +342,15 @@ class CallSession:
 
     # Scheduling
 
+    def _refuse_if_emergency(self) -> None:
+        if self.priority == Priority.P0:
+            raise ActionRefused(
+                "This is a safety emergency. Don't book or move anything on this call; the caller "
+                "should be leaving the house."
+            )
+
     def find_appointment_options(self, reschedule_appointment_id: int | None = None) -> str:
+        self._refuse_if_emergency()
         if reschedule_appointment_id is not None:
             appointment = self._own_appointment(reschedule_appointment_id)
             county, priority = appointment.county, appointment.priority
@@ -302,8 +387,6 @@ class CallSession:
     def _check_ready_to_schedule(self) -> None:
         if self.assessment is None:
             raise ActionRefused("Find out what's wrong and call assess_situation before looking for times.")
-        if self.assessment.priority == Priority.P0:
-            raise ActionRefused("This is a safety emergency. Don't book anything on this call.")
         if self.property == "commercial":
             raise ActionRefused("Commercial property: no booking. Offer a callback from the office instead.")
         if self.area is None:
@@ -350,9 +433,8 @@ class CallSession:
         phone_e164 = normalize_phone(phone)
         zip5 = normalize_zip(zip_code)
 
+        self._refuse_if_emergency()
         problems = []
-        if self.priority == Priority.P0:
-            raise ActionRefused("This is a safety emergency. Don't book anything on this call.")
         if self.booked:
             problems.append(
                 f"this call already booked appointment #{self.booked[-1]}; use change_appointment to move it"
@@ -425,6 +507,7 @@ class CallSession:
         )
 
     def change_appointment(self, appointment_id: int, option_id: str) -> str:
+        self._refuse_if_emergency()
         appointment = self._own_appointment(appointment_id)
         option = self.offered.get(option_id)
         if option is None:
@@ -683,8 +766,13 @@ class CallSession:
         }
 
     def _who(self) -> str:
-        person = self.customer or self.caller_match
-        name = person.full_name if person else "unknown caller"
+        if self.customer:
+            name = self.customer.full_name
+        elif self.caller_match:
+            # Caller ID isn't identity: the person on the line may be a spouse or a guest.
+            name = f"unverified caller; caller ID matches {self.caller_match.full_name}"
+        else:
+            name = "unknown caller"
         phone = say_phone(self.callback_phone) if self.callback_phone else "no number"
         place = f", {self.area.county} County" if self.area and self.area.county else ""
         return f"{name} ({phone}{place})"

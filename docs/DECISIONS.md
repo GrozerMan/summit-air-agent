@@ -11,7 +11,7 @@ The model extracts facts (`gas_smell`, `no_heat`, `indoor_temp_f`, `vulnerable_o
 The same pattern holds for booking: the backend refuses rather than trusting the prompt. Prompt rules are for tone; code rules are for anything that costs money or safety.
 
 ## 3. Safety is conservative and short
-Gas, CO and smoke/fire are P0 regardless of anything else, including "the smell went away": once a hazard is reported on a call, a later "no" doesn't clear it. The script is fixed text (get out, don't touch switches or phones inside, call 911 or the county's gas utility from outside), taken from National Grid and Con Edison's own guidance. The agent doesn't collect booking details first, and lets a caller who is still inside hang up. Priority never goes down within a call, so a calmer second description can't undo a gas report.
+Gas, CO and smoke/fire are P0 regardless of anything else, including "the smell went away": once a hazard is reported on a call, a later "no" doesn't clear it. The script is fixed text (get out, don't touch switches or phones inside, call nine-one-one or the county's gas utility from outside), taken from National Grid and Con Edison's own guidance. The agent doesn't collect booking details first, and lets a caller who is still inside hang up. Priority never goes down within a call, so a calmer second description can't undo a gas report.
 
 ## 4. Identity before account details
 Caller ID alone is not proof (shared phones, spouses, spoofing). The greeting asks "Am I speaking with Dana?"; membership, address and history are only disclosed after that, or after phone plus last name or ZIP. A household number shared by several customers isn't greeted by name at all. Unverified callers get non-member pricing, and an unverified booking attaches to the existing customer without overwriting their record; the contact details live on the appointment.
@@ -36,6 +36,15 @@ Scripted multi-turn tests break whenever the model asks things in a different or
 
 ## 11. SQLite, one connection per call, `BEGIN IMMEDIATE` for bookings
 Each call has its own connection; the seat check and the insert happen inside one immediate transaction, so two callers racing for the last seat can't both get it. There's a test that proves this fails without the lock. SQLite is right for a demo and wrong for production (see below).
+
+## 12. The model is not the only way into P0
+**Found by test call P0-01.** The caller said the furnace smelled "kinda like a skunk... earlier today, but now it's gone". The model called `assess_situation` with `gas_smell=false` (the description it passed even said "skunk-like"), triage scored P3, and the agent offered three appointment windows. It escalated only after the caller asked "do you not care that it might be a gas leak? It smells like rotten eggs." Decision 2 held: the LLM didn't decide urgency. But the LLM did decide the *input* to the rule, so the guarantee was only as good as one non-deterministic extraction.
+**Chose:** a deterministic hazard lexicon (`summit/hazard_words.py`: rotten eggs, sulfur, skunk, smell-words near gas/propane, a sounding CO alarm) at three layers, any of which reaches P0 on its own:
+1. **Before the model:** `SummitAgent.llm_node` screens each caller turn. On a hit, the backend goes to P0 (alert, outcome, offered windows voided) and the safety script is spoken as fixed text without an LLM call. `llm_node` rather than an STT event so it works for phone calls, `console --text` and the evals alike.
+2. **In triage:** `assess()` runs the lexicon on the model's `description`, so `gas_smell=false` with "skunk-like" in the description is still P0.
+3. **In the backend:** finding, booking, moving and rescheduling all refuse on P0. Refusal is checked in one place.
+**Also:** spoken scripts say "nine-one-one" and spell the utility number group by group (the model had said "nine hundred and eleven"). "I can't / don't feel safe leaving" after the script gets a fixed answer rather than an improvised one, and for the rest of a P0 call every model turn carries a standing system note. Alerts for unverified callers say "caller ID matches X" rather than naming X as the caller.
+**Gave up:** some false positives. A caller who mentions a skunk under the porch gets told to leave. Plain same-clause negation ("I don't smell gas") is excluded; hedges ("not sure, but it smells like gas") are not. A dusty first-use smell, or "gas furnace", doesn't fire, and those are pinned as negative-control tests. Smoke/sparks/flames are still model-extracted: "fire" is too ambiguous in HVAC speech ("the furnace won't fire") for a word list.
 
 ## Cut for time (and what I'd do next)
 - **System of record:** real ServiceTitan / Housecall Pro integration behind `Store` (customer, location, job type, capacity, booking, notes).

@@ -1,7 +1,7 @@
 import pytest
 
 from summit.models import Priority
-from summit.triage import Facts, assess, safety_script
+from summit.triage import Facts, assess, cannot_leave_script, safety_script
 
 
 def priority(cfg, **facts):
@@ -90,5 +90,31 @@ def test_gas_script_names_the_county_utility(cfg):
 
 def test_gas_script_without_county_still_says_911(cfg):
     script = safety_script("gas", None, cfg)
-    assert "911" in script
+    assert "nine-one-one" in script
     assert "leave the house now" in script
+
+
+@pytest.mark.parametrize("hazard", ["gas", "co", "fire"])
+@pytest.mark.parametrize("county", ["Nassau", "Westchester", None])
+def test_spoken_scripts_have_no_digits(cfg, hazard, county):
+    # Digits are what TTS read as "nine hundred and eleven" on test call P0-01.
+    for script in (safety_script(hazard, county, cfg), cannot_leave_script(hazard)):
+        assert not any(ch.isdigit() for ch in script), script
+        assert "nine-one-one" in script
+
+
+def test_description_with_gas_words_is_p0_even_when_the_model_says_no_gas(cfg):
+    # Test call P0-01, verbatim from the tool log: the model sent gas_smell=false.
+    facts = Facts(gas_smell=False, description="nasty skunk-like smell from furnace earlier but now gone")
+    result = assess(facts, cfg)
+    assert result.priority == Priority.P0
+    assert result.hazard == "gas"
+    assert "caller's words" in result.reasons[0]
+
+
+def test_dusty_first_use_description_stays_routine(cfg):
+    facts = Facts(
+        dusty_smell_first_use=True,
+        description="dusty burning smell, first time turning the heat on this year, gas furnace",
+    )
+    assert assess(facts, cfg).priority == Priority.P3

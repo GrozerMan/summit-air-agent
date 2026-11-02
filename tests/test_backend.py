@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import pytest
 from conftest import TUESDAY_10AM, TZ
 
-from summit.backend import ActionRefused
+from summit.backend import ActionRefused, caller_turn_to_screen
 from summit.models import Priority
 from summit.seed import SHARED_HOUSEHOLD_PHONE
 from summit.triage import Facts
@@ -83,7 +83,7 @@ def test_gas_mention_raises_critical_alert_with_script(make_call, seeded):
     call = make_call("+16315550177")
     result = call.assess_situation(Facts(gas_smell=True))
     assert "word for word" in result
-    assert "National Grid at 1-800-490-0045" in result
+    assert "National Grid at one, eight hundred, four nine zero, zero zero four five" in result
     assert seeded.alerts_for_call("call-1")[0]["severity"] == "critical"
     assert call.outcome == "safety_emergency"
 
@@ -306,3 +306,128 @@ def test_turning_away_never_overwrites_a_safety_emergency(make_call):
     call.assess_situation(Facts(gas_smell=True))
     call.check_service_address(zip_code="11215", property_type="house")
     assert call.outcome == "safety_emergency"
+
+
+# The caller's own words (test call P0-01)
+
+P0_01_TURN = (
+    "So we've got this smell coming from our furnace. It's kinda like a skunk. "
+    "It's pretty nasty. It happened earlier today. But now it's gone."
+)
+
+
+def test_gas_words_make_the_call_p0_before_the_model_answers(make_call, seeded):
+    call = make_call("+16315550177")
+    said = call.screen_caller_turn(P0_01_TURN)
+    assert call.priority == Priority.P0
+    assert said and "leave the house now" in said
+    assert seeded.alerts_for_call("call-1")[0]["severity"] == "critical"
+    assert call.outcome == "safety_emergency"
+    assert call.tool_log[-1]["tool"] == "hazard_screen"
+
+
+def test_p0_01_replayed_never_reaches_scheduling(make_call):
+    # Same tool calls the model made on the failed call, in the same order.
+    call = make_call("+16466790972")
+    call.screen_caller_turn(P0_01_TURN)
+    call.assess_situation(
+        Facts(gas_smell=False, description="nasty skunk-like smell from furnace earlier but now gone")
+    )
+    call.check_service_address(zip_code="11001", property_type="house")
+    with pytest.raises(ActionRefused, match="safety emergency"):
+        call.find_appointment_options()
+    assert call.priority == Priority.P0
+
+
+def test_model_triage_alone_catches_p0_01(make_call):
+    # Even without the screen, the model's own description now carries the call to P0.
+    call = make_call("+16466790972")
+    result = call.assess_situation(
+        Facts(gas_smell=False, description="nasty skunk-like smell from furnace earlier but now gone")
+    )
+    assert "SAFETY EMERGENCY" in result
+
+
+def test_smell_after_times_were_offered_voids_them(make_call):
+    call = make_call(None)
+    call.assess_situation(Facts(request_type="tune_up", description="fall tune-up"))
+    call.check_service_address(zip_code="11743", property_type="house")
+    offered = call.find_appointment_options()
+    option_id = offered.split("\n")[1].split(":")[0].lstrip("- ")
+    call.screen_caller_turn("oh and actually it smelled like rotten eggs this morning")
+    assert call.offered == {}
+    with pytest.raises(ActionRefused, match="safety emergency"):
+        call.book_appointment(
+            option_id, "Jen", "Morales", "6315550155", "33 Shore Road, Huntington", "11743",
+            "tune-up", "", True, True,
+        )  # fmt: skip
+
+
+def test_no_rescheduling_during_an_emergency(member_call):
+    member_call.lookup_customer(confirmed_name=True)
+    member_call.screen_caller_turn("I smell gas")
+    with pytest.raises(ActionRefused, match="safety emergency"):
+        member_call.find_appointment_options(reschedule_appointment_id=1)
+    with pytest.raises(ActionRefused, match="safety emergency"):
+        member_call.change_appointment(1, "anything")
+
+
+def test_safety_script_is_read_once(make_call):
+    call = make_call(None)
+    script = call.screen_caller_turn("rotten egg smell")
+    assert call.screen_caller_turn("it smells like rotten eggs still", said_so_far=script) is None
+
+
+def test_script_is_reread_if_the_model_paraphrased_it(make_call):
+    call = make_call(None)
+    call.assess_situation(Facts(gas_smell=True))  # model-triggered; it then paraphrases
+    again = call.screen_caller_turn("okay", said_so_far="You should leave, call 911.")
+    assert again == call.safety_script()
+
+
+def test_cannot_leave_gets_the_fixed_answer(make_call):
+    call = make_call(None)
+    script = call.screen_caller_turn("smelled like a skunk earlier")
+    reply = call.screen_caller_turn(
+        "It's kinda dark outside. And I don't feel safe leaving.", said_so_far=script
+    )
+    assert reply and "nine-one-one" in reply and "can't leave" in reply
+
+
+def test_dusty_smell_turn_is_left_to_the_model(make_call):
+    call = make_call(None)
+    assert call.screen_caller_turn("dusty burning smell, first time turning heat on this year") is None
+    assert call.priority is None
+    assert call.emergency_note() is None
+
+
+def test_emergency_note_after_p0(make_call):
+    call = make_call(None)
+    call.screen_caller_turn("I smell gas")
+    note = call.emergency_note()
+    assert note and "don't book" in note and "nine-one-one" in note
+
+
+def test_unverified_caller_is_not_named_as_the_account_holder(member_call, seeded):
+    member_call.screen_caller_turn("rotten eggs by the furnace")
+    summary = seeded.alerts_for_call("call-1")[0]["summary"]
+    assert "unverified caller; caller ID matches" in summary
+
+
+class _Item:
+    def __init__(self, type, role=None, text=None):
+        self.type, self.role, self.text_content = type, role, text
+
+
+def test_only_the_first_reply_to_a_caller_turn_is_screened():
+    history = [
+        _Item("message", "system", "instructions"),
+        _Item("message", "assistant", "Thanks for calling."),
+        _Item("message", "user", "rotten eggs"),
+    ]
+    assert caller_turn_to_screen(history) == ("rotten eggs", "Thanks for calling.")
+    after_tool = [*history, _Item("function_call"), _Item("function_call_output")]
+    assert caller_turn_to_screen(after_tool)[0] is None
+    # Bookkeeping items after the caller's words don't hide them from the screen.
+    with_handoff = [*history, _Item("agent_handoff")]
+    assert caller_turn_to_screen(with_handoff)[0] == "rotten eggs"

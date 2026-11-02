@@ -24,14 +24,33 @@ async def first_turn(user_input: str, caller_id: str | None = None):
 
 async def test_gas_mention_goes_straight_to_triage():
     call, result = await first_turn("Hi, I think I smell gas by the furnace. It's kind of faint.")
-    tool = result.expect.contains_function_call(name="assess_situation")
-    assert json.loads(tool.event().item.arguments).get("gas_smell") is True
+    # The hazard screen answers this turn with the fixed script, before the model runs.
     assert call.outcome == "safety_emergency"
-    async with inference.LLM(JUDGE_MODEL) as judge:
-        await result.expect.contains_message(role="assistant").judge(
-            judge,
-            intent="Tells the caller to leave the house now and call 911 or the gas company from outside.",
-        )
+    said = " ".join(
+        e.item.text_content or "" for e in result.events if e.type == "message" and e.item.role == "assistant"
+    )
+    assert "leave the house now" in said and "nine-one-one" in said
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        "So there's this smell from the furnace, kinda like a skunk. It was earlier today, it's gone now.",
+        "There was a rotten egg smell earlier but it stopped.",
+        "There's a sulfur kind of smell near the furnace.",
+    ],
+)
+async def test_indirect_gas_words_never_reach_scheduling(words):
+    call, _ = await first_turn(words)
+    assert call.outcome == "safety_emergency"
+    assert not call.offered
+
+
+async def test_dusty_first_use_smell_is_not_an_emergency():
+    call, _ = await first_turn(
+        "We turned the heat on for the first time this year and there's a dusty burning smell."
+    )
+    assert call.priority != 0 and call.outcome != "safety_emergency"
 
 
 async def test_repair_costs_are_not_estimated():

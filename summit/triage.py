@@ -4,7 +4,10 @@ The model extracts facts from the conversation; these rules turn facts into a
 priority. Same facts, same priority, and every assessment lists the rules that
 fired so the office can see why a call was rated the way it was.
 
-    P0  gas smell (even "gone now"), CO alarm or symptoms, smoke / sparks / flames
+    P0  gas smell (even "gone now"), CO alarm or symptoms, smoke / sparks / flames.
+        Gas and CO also come from the caller's own words (hazard_words), so a
+        model that reports gas_smell=false for "smelled like a skunk" can't
+        keep the call out of P0.
     P1  no heat with a vulnerable occupant or indoor temp at/below the threshold
         no cooling with a vulnerable occupant or indoor temp at/above the threshold
         persistent burning smell, active leak
@@ -15,7 +18,9 @@ fired so the office can see why a call was rated the way it was.
 from dataclasses import dataclass, field, fields, replace
 from typing import Any
 
+from summit.hazard_words import hazard_in
 from summit.models import Priority
+from summit.speech import say_hotline
 
 
 @dataclass
@@ -76,12 +81,17 @@ class Assessment:
 def assess(facts: Facts, cfg: dict[str, Any]) -> Assessment:
     rules = cfg["triage"]
 
+    heard = hazard_in(facts.description)
     hazards = [
-        ("gas", facts.gas_smell, "gas smell reported"),
-        ("co", facts.co_alarm_or_symptoms, "carbon monoxide alarm or symptoms"),
-        ("fire", facts.smoke_sparks_or_flames, "smoke, sparks or flames"),
+        ("gas", facts.gas_smell, heard == "gas", "gas smell reported"),
+        ("co", facts.co_alarm_or_symptoms, heard == "co", "carbon monoxide alarm or symptoms"),
+        ("fire", facts.smoke_sparks_or_flames, False, "smoke, sparks or flames"),
     ]
-    fired = [(kind, reason) for kind, present, reason in hazards if present]
+    fired = [
+        (kind, reason if reported else f"{reason} (caller's words)")
+        for kind, reported, in_words, reason in hazards
+        if reported or in_words
+    ]
     if fired:
         return Assessment(Priority.P0, [r for _, r in fired], hazard=fired[0][0])
 
@@ -122,11 +132,20 @@ def assess(facts: Facts, cfg: dict[str, Any]) -> Assessment:
     return Assessment(Priority.P3, [facts.request_type or "routine request"])
 
 
+# Spoken text says "nine-one-one". Written as "911", TTS (or the model, when it
+# paraphrases) can read it as "nine hundred and eleven".
+EMERGENCY = "nine-one-one"
+
+
 def safety_script(hazard: str, county: str | None, cfg: dict[str, Any]) -> str:
     """The exact words for a P0 call. Kept short; the caller should be leaving, not listening."""
     if hazard == "gas":
         utility = cfg["gas_utilities"].get(county or "")
-        who_to_call = f"call 911 or {utility['name']} at {utility['phone']}" if utility else "call 911"
+        who_to_call = (
+            f"call {EMERGENCY}, or {utility['name']} at {say_hotline(utility['phone'])}"
+            if utility
+            else f"call {EMERGENCY}"
+        )
         return (
             "This could be a gas leak, so please leave the house now and take everyone with you. "
             "Don't touch light switches, appliances or phones on your way out. "
@@ -136,11 +155,38 @@ def safety_script(hazard: str, county: str | None, cfg: dict[str, Any]) -> str:
     if hazard == "co":
         return (
             "Carbon monoxide is dangerous, so please get everyone out into fresh air right now, "
-            "and leave the door open behind you. Once you're outside, call 911, especially if "
-            "anyone has a headache, dizziness or nausea. "
+            "and leave the door open behind you. "
+            f"Once you're outside, call {EMERGENCY}, especially if anyone has a headache, "
+            "dizziness or nausea. "
             "Don't go back in until the fire department says it's safe."
         )
     return (
-        "Please get everyone out of the house right now and call 911 once you're outside. "
+        f"Please get everyone out of the house right now and call {EMERGENCY} once you're outside. "
         "Don't try to put it out or go back in."
+    )
+
+
+def cannot_leave_script(hazard: str) -> str:
+    """For a caller who, after the safety script, says they can't or won't get out.
+
+    This used to be improvised by the model, on the most safety-critical turn of the
+    call. The owner should sign off on this wording.
+    """
+    if hazard == "gas":
+        return (
+            "I understand. If you can, step just outside the front door, or go to a neighbor's, "
+            "somewhere you can still see the street. "
+            f"If you really can't get out, hang up and call {EMERGENCY} right now. Tell them you "
+            "smell gas and can't leave. Open a door or window if you can, and don't switch "
+            "anything on or off."
+        )
+    if hazard == "co":
+        return (
+            "I understand. If you really can't get out, open windows and doors, stay right by "
+            f"the fresh air, and hang up and call {EMERGENCY} right now. Tell them a carbon "
+            "monoxide alarm is going off and you can't leave."
+        )
+    return (
+        f"I understand. If you can't get out, hang up and call {EMERGENCY} right now and tell "
+        "them exactly where you are in the house."
     )
