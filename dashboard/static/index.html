@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Summit Air · Dispatch</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --ink: #1c2330; --muted: #6b7484; --line: #e3e6eb;
+    --p0: #c62828; --p1: #e0711b; --p2: #b8921a; --p3: #4a7c59; --accent: #2457c5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12151b; --panel: #1b1f27; --ink: #e7eaf0; --muted: #949cab; --line: #2b313c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 16px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 17px; margin: 0; }
+  header .updated { color: var(--muted); font-size: 12px; margin-left: auto; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 24px; max-width: 1400px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  section.wide { grid-column: 1 / -1; }
+  section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .empty { color: var(--muted); padding: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; }
+  tr:last-child td { border-bottom: 0; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .badge { display: inline-block; min-width: 28px; text-align: center; padding: 1px 6px; border-radius: 4px; color: #fff; font-weight: 600; font-size: 12px; }
+  .p0 { background: var(--p0); } .p1 { background: var(--p1); } .p2 { background: var(--p2); } .p3 { background: var(--p3); }
+  .alert { display: flex; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .alert.critical { border-left: 4px solid var(--p0); }
+  .alert.urgent { border-left: 4px solid var(--p1); }
+  .alert.done { opacity: .5; }
+  .alert .text { flex: 1; }
+  .muted { color: var(--muted); font-size: 12px; }
+  button { font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 4px; cursor: pointer; }
+  #detail { position: fixed; inset: 0 0 0 auto; width: min(560px, 100vw); background: var(--panel); border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0,0,0,.12); padding: 20px; overflow-y: auto; display: none; }
+  #detail.open { display: block; }
+  #detail h3 { margin: 0 0 4px; }
+  .turn { margin: 6px 0; }
+  .turn b { display: inline-block; width: 70px; color: var(--muted); font-weight: 500; }
+  .turn.tool { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 12px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Summit Air dispatch</h1>
+  <span class="updated" id="updated"></span>
+</header>
+<main>
+  <section><h2>Alerts</h2><div id="alerts"></div></section>
+  <section><h2>Callbacks due</h2><div id="callbacks"></div></section>
+  <section class="wide"><h2>Calls</h2><div id="calls"></div></section>
+  <section class="wide"><h2>Booked appointments</h2><div id="appointments"></div></section>
+</main>
+<aside id="detail"></aside>
+
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const time = iso => iso ? new Date(iso).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"}) : "";
+const badge = p => p === null || p === undefined ? "" : `<span class="badge p${p}">P${p}</span>`;
+const phone = n => n ? n.replace(/^\+1(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3") : "";
+
+async function get(path) {
+  const r = await fetch(path);
+  return r.json();
+}
+
+async function post(path) {
+  await fetch(path, {method: "POST"});
+  refresh();
+}
+
+function renderAlerts(alerts) {
+  if (!alerts.length) return `<div class="empty">No alerts.</div>`;
+  return alerts.map(a => `
+    <div class="alert ${a.severity} ${a.acknowledged ? "done" : ""}">
+      <div class="text"><strong>${esc(a.severity)}</strong> ${esc(a.summary)}
+        <div class="muted">${time(a.created_at.replace(" ", "T") + "Z")}</div></div>
+      ${a.acknowledged ? "" : `<button onclick="post('/api/alerts/${a.id}/ack')">Got it</button>`}
+    </div>`).join("");
+}
+
+function renderCallbacks(callbacks) {
+  if (!callbacks.length) return `<div class="empty">Nothing to call back.</div>`;
+  return `<table><tr><th>Due</th><th>Number</th><th>Reason</th><th></th></tr>` +
+    callbacks.map(c => `<tr>
+      <td>${c.urgent ? "<strong>urgent</strong> " : ""}${time(c.due_at)}</td>
+      <td>${esc(phone(c.phone))}${c.name ? `<div class="muted">${esc(c.name)}</div>` : ""}</td>
+      <td>${esc(c.reason)}</td>
+      <td><button onclick="post('/api/callbacks/${c.id}/done')">Done</button></td></tr>`).join("") + `</table>`;
+}
+
+function renderCalls(calls) {
+  if (!calls.length) return `<div class="empty">No calls yet.</div>`;
+  return `<table><tr><th>Started</th><th></th><th>Caller</th><th>Outcome</th><th>Summary</th></tr>` +
+    calls.map(c => `<tr class="clickable" onclick="openCall('${c.id}')">
+      <td>${time(c.started_at)}${c.ended_at ? "" : ` <span class="muted">live</span>`}</td>
+      <td>${badge(c.priority)}</td>
+      <td>${esc(phone(c.caller_id)) || '<span class="muted">unknown</span>'}</td>
+      <td>${esc(c.outcome || "in progress")}</td>
+      <td>${esc(c.summary)}</td></tr>`).join("") + `</table>`;
+}
+
+function renderAppointments(appts) {
+  if (!appts.length) return `<div class="empty">Nothing booked.</div>`;
+  return `<table><tr><th>Day</th><th>Window</th><th></th><th>Customer</th><th>Job</th><th>Address</th><th>Pool</th></tr>` +
+    appts.map(a => `<tr>
+      <td>${esc(a.day)}</td><td>${esc(a.arrival_window)}</td><td>${badge(a.priority)}</td>
+      <td>${esc(a.contact_name)}<div class="muted">${esc(phone(a.contact_phone))}</div></td>
+      <td>${esc(a.job_type)}</td><td>${esc(a.service_address)}</td><td>${esc(a.pool)}</td></tr>`).join("") + `</table>`;
+}
+
+async function openCall(id) {
+  const c = await get(`/api/calls/${id}`);
+  const r = c.record || {};
+  const transcript = (c.transcript || []).map(t => t.role === "tool"
+    ? `<div class="turn tool">→ ${esc(t.text)}</div>`
+    : `<div class="turn"><b>${t.role === "user" ? "Caller" : "Agent"}</b>${esc(t.text)}</div>`).join("");
+  const tools = (r.tools || []).map(t =>
+    `<div class="turn tool">${t.refused ? "✗" : "✓"} ${esc(t.tool)} — ${esc(t.result)}</div>`).join("");
+  const detail = document.getElementById("detail");
+  detail.innerHTML = `
+    <button style="float:right" onclick="closeCall()">Close</button>
+    <h3>${badge(c.priority)} ${esc(phone(c.caller_id) || "Unknown caller")}</h3>
+    <div class="muted">${time(c.started_at)} · ${esc(c.outcome || "in progress")}</div>
+    <p>${esc(c.summary)}</p>
+    ${r.reasons && r.reasons.length ? `<p><strong>Why:</strong> ${esc(r.reasons.join(", "))}</p>` : ""}
+    <h4>Transcript</h4>${transcript || '<div class="muted">No transcript yet.</div>'}
+    <h4>Tool calls</h4>${tools || '<div class="muted">None.</div>'}`;
+  detail.classList.add("open");
+}
+
+function closeCall() { document.getElementById("detail").classList.remove("open"); }
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeCall(); });
+
+async function refresh() {
+  try {
+    const [alerts, callbacks, calls, appts] = await Promise.all(
+      ["alerts", "callbacks", "calls", "appointments"].map(k => get(`/api/${k}`)));
+    document.getElementById("alerts").innerHTML = renderAlerts(alerts);
+    document.getElementById("callbacks").innerHTML = renderCallbacks(callbacks);
+    document.getElementById("calls").innerHTML = renderCalls(calls);
+    document.getElementById("appointments").innerHTML = renderAppointments(appts);
+    document.getElementById("updated").textContent = "Updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById("updated").textContent = "Can't reach the dashboard server";
+  }
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
