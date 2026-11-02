@@ -1,37 +1,432 @@
+"""Summit Air inbound phone agent.
+
+    uv run python agent.py console --text   type to it
+    uv run python agent.py console          talk to it through your mic
+    uv run python agent.py dev              take real calls on your LiveKit number
+
+The model handles the conversation. Every decision that matters (priority,
+eligibility, availability, price) comes back from summit/ through the tools below.
+"""
+
+import asyncio
+import logging
+import os
+import uuid
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+from typing import Any
+
 from dotenv import load_dotenv
-from livekit.agents import Agent, AgentServer, AgentSession, JobContext, cli, inference
+from livekit.agents import (
+    Agent,
+    AgentServer,
+    AgentSession,
+    JobContext,
+    RunContext,
+    ToolError,
+    TurnHandlingOptions,
+    UserStateChangedEvent,
+    cli,
+    function_tool,
+    inference,
+    llm,
+    room_io,
+)
+from livekit.agents.beta import EndCallTool
+from livekit.plugins import krisp
+
+from summit import config
+from summit.backend import ActionRefused, CallSession
+from summit.notify import Notifier
+from summit.store import Store
+from summit.triage import Facts
 
 load_dotenv(".env.local")
 
-INSTRUCTIONS = """\
-You answer the phone for Summit Air, a residential heating and cooling company.
-This is a phone call: keep replies to a sentence or two and ask one question at a time.
-"""
+logger = logging.getLogger("summit-air")
 
-GREETING = "Thanks for calling Summit Air, how can I help?"
+# Must match the agent name in the LiveKit dispatch rule for the phone number.
+AGENT_NAME = "summit-air"
+PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text()
+
+CHECK_INS = ["Are you still there?", "Sorry, I can't hear you. If you're still there, just say something."]
+SILENT_GOODBYE = "I'll let you go for now. If you still need us, call back any time. Goodbye."
+
+Transfer = Callable[[str], Awaitable[None]]
+
+
+def build_llm() -> llm.LLM:
+    # Falls over to the second model if the first errors or is slow to start answering.
+    return llm.FallbackAdapter(
+        [inference.LLM("openai/gpt-4.1-mini"), inference.LLM("google/gemini-2.5-flash")],
+        attempt_timeout=4.0,
+    )
+
+
+def instructions_for(call: CallSession) -> str:
+    now = call.now()
+    office = "open" if config.office_open(call.cfg, now) else "closed"
+    time_of_day = now.strftime("%I:%M %p").lstrip("0")
+    return (
+        f"{PROMPT}\n\n## Right now\nIt's {now:%A}, {now:%B} {now.day}, {time_of_day}. The office is {office}."
+    )
+
+
+class SummitAgent(Agent):
+    def __init__(
+        self, call: CallSession, transfer: Transfer | None = None, tools: list | None = None
+    ) -> None:
+        super().__init__(instructions=instructions_for(call), tools=tools or [])
+        self.call = call
+        self._transfer = transfer
+
+    async def on_enter(self) -> None:
+        # A fixed line, so the caller hears us immediately instead of waiting on the LLM.
+        self.session.say(self.call.greeting(), allow_interruptions=False)
+
+    def _run(self, tool: str, args: dict[str, Any], action: Callable[[], str]) -> str:
+        try:
+            result = action()
+        except ActionRefused as refused:
+            self.call.log_tool(tool, args, str(refused), refused=True)
+            raise ToolError(str(refused)) from None
+        self.call.log_tool(tool, args, result)
+        return result
+
+    @function_tool
+    async def lookup_customer(
+        self,
+        context: RunContext,
+        confirmed_name: bool | None = None,
+        phone: str | None = None,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        zip_code: str | None = None,
+    ) -> str:
+        """Verify who's calling. Nothing about an account can be shared until this succeeds.
+
+        Args:
+            confirmed_name: True if they said yes to the name in the greeting, False if they said no.
+            phone: The phone number on their account, if it's not the one they're calling from.
+            first_name: Their first name. Only needed when several people share a number.
+            last_name: Their last name.
+            zip_code: The ZIP code of the address on their account.
+        """
+        args = dict(
+            confirmed_name=confirmed_name,
+            phone=phone,
+            first_name=first_name,
+            last_name=last_name,
+            zip_code=zip_code,
+        )
+        return self._run("lookup_customer", args, lambda: self.call.lookup_customer(**args))
+
+    @function_tool
+    async def assess_situation(
+        self,
+        context: RunContext,
+        description: str,
+        gas_smell: bool | None = None,
+        co_alarm_or_symptoms: bool | None = None,
+        smoke_sparks_or_flames: bool | None = None,
+        burning_smell_persistent: bool | None = None,
+        dusty_smell_first_use: bool | None = None,
+        no_heat: bool | None = None,
+        no_cooling: bool | None = None,
+        indoor_temp_f: int | None = None,
+        vulnerable_occupant: bool | None = None,
+        active_leak: bool | None = None,
+        minor_drip: bool | None = None,
+        request_type: str | None = None,
+    ) -> str:
+        """Report what the caller has described. Call it as soon as you know the problem and
+        again whenever you learn something new. Leave anything you don't know empty; never guess.
+        The result is the priority: relay it, don't second-guess it.
+
+        Args:
+            description: The problem in a few words, close to how the caller put it.
+            gas_smell: They smell gas or rotten eggs, now or earlier on this call.
+            co_alarm_or_symptoms: A carbon monoxide alarm went off, or people at home have
+                headaches, dizziness or nausea.
+            smoke_sparks_or_flames: Smoke, sparks or flames from any equipment.
+            burning_smell_persistent: A burning or electrical smell that hasn't gone away.
+            dusty_smell_first_use: A dusty smell the first time the heat ran this season.
+            no_heat: The heat isn't working.
+            no_cooling: The air conditioning isn't working.
+            indoor_temp_f: The temperature inside right now, in Fahrenheit.
+            vulnerable_occupant: Someone elderly, an infant, or someone with a medical need is at home.
+            active_leak: Water is actively leaking.
+            minor_drip: A small drip only.
+            request_type: For non-problems: tune_up, estimate, or other.
+        """
+        args = dict(
+            description=description, gas_smell=gas_smell, co_alarm_or_symptoms=co_alarm_or_symptoms,
+            smoke_sparks_or_flames=smoke_sparks_or_flames, burning_smell_persistent=burning_smell_persistent,
+            dusty_smell_first_use=dusty_smell_first_use, no_heat=no_heat, no_cooling=no_cooling,
+            indoor_temp_f=indoor_temp_f, vulnerable_occupant=vulnerable_occupant, active_leak=active_leak,
+            minor_drip=minor_drip, request_type=request_type,
+        )  # fmt: skip
+        return self._run("assess_situation", args, lambda: self.call.assess_situation(Facts(**args)))
+
+    @function_tool
+    async def check_service_address(
+        self,
+        context: RunContext,
+        zip_code: str | None = None,
+        town: str | None = None,
+        property_type: str | None = None,
+    ) -> str:
+        """Check the address where the work is: that we serve it and that it's a home.
+
+        Args:
+            zip_code: ZIP code of the service address.
+            town: Town of the service address, if they don't know the ZIP or the tool asks for it.
+            property_type: What the property is, in their words: house, condo, two-family, restaurant...
+        """
+        args = dict(zip_code=zip_code, town=town, property_type=property_type)
+        return self._run("check_service_address", args, lambda: self.call.check_service_address(**args))
+
+    @function_tool
+    async def find_appointment_options(
+        self, context: RunContext, reschedule_appointment_id: int | None = None
+    ) -> str:
+        """Get arrival windows to offer. For a new visit, call it after assess_situation and
+        check_service_address. To move an existing appointment, pass its id.
+
+        Args:
+            reschedule_appointment_id: The id of the appointment being moved, if rescheduling.
+        """
+        args = dict(reschedule_appointment_id=reschedule_appointment_id)
+        return self._run("find_appointment_options", args, lambda: self.call.find_appointment_options(**args))
+
+    @function_tool
+    async def book_appointment(
+        self,
+        context: RunContext,
+        option_id: str,
+        first_name: str,
+        last_name: str,
+        phone: str,
+        address: str,
+        zip_code: str,
+        job_type: str,
+        notes: str,
+        phone_read_back_confirmed: bool,
+        address_read_back_confirmed: bool,
+    ) -> str:
+        """Book the window the caller chose. Before calling, read the phone number back digit
+        by digit and the full address back, and hear them confirm both.
+
+        Args:
+            option_id: The option_id of the window they picked.
+            first_name: Caller's first name.
+            last_name: Caller's last name.
+            phone: Best number to reach them.
+            address: Street address of the service location, with the town.
+            zip_code: ZIP code of the service location.
+            job_type: What the visit is for, e.g. "no heat", "AC repair", "tune-up".
+            notes: Anything the technician should know: access, pets, equipment, what they've tried.
+            phone_read_back_confirmed: You read the number back and they said it's right.
+            address_read_back_confirmed: You read the address back and they said it's right.
+        """
+        args = dict(
+            option_id=option_id, first_name=first_name, last_name=last_name, phone=phone,
+            address=address, zip_code=zip_code, job_type=job_type, notes=notes,
+            phone_read_back_confirmed=phone_read_back_confirmed,
+            address_read_back_confirmed=address_read_back_confirmed,
+        )  # fmt: skip
+        return self._run("book_appointment", args, lambda: self.call.book_appointment(**args))
+
+    @function_tool
+    async def change_appointment(self, context: RunContext, appointment_id: int, option_id: str) -> str:
+        """Move an existing appointment to a window offered by find_appointment_options.
+
+        Args:
+            appointment_id: The appointment being moved.
+            option_id: The new window they picked.
+        """
+        args = dict(appointment_id=appointment_id, option_id=option_id)
+        return self._run("change_appointment", args, lambda: self.call.change_appointment(**args))
+
+    @function_tool
+    async def request_callback(
+        self, context: RunContext, phone: str, reason: str, urgent: bool = False, name: str | None = None
+    ) -> str:
+        """Have the office call the caller back. Tell them exactly what the result says.
+
+        Args:
+            phone: The number to call back. Read it back to them first.
+            reason: What the callback is about, for the office.
+            urgent: True for urgent problems that couldn't be booked in time.
+            name: Who to ask for.
+        """
+        args = dict(phone=phone, reason=reason, urgent=urgent, name=name)
+        return self._run("request_callback", args, lambda: self.call.request_callback(**args))
+
+    @function_tool
+    async def transfer_to_human(self, context: RunContext, reason: str) -> str:
+        """The caller wants to talk to a person.
+
+        Args:
+            reason: Why, in a few words.
+        """
+        number, message = self.call.plan_transfer()
+        if number and self._transfer:
+            # Let the model say "connecting you now" first; the transfer starts once that's been heard.
+            context.speech_handle.add_done_callback(lambda _: asyncio.create_task(self._transfer_to(number)))
+            message = "Tell the caller, in one short sentence, that you're connecting them to the office now."
+        elif number:
+            number, message = None, "Live transfer isn't available here. Offer a callback from the office."
+        self.call.log_tool("transfer_to_human", {"reason": reason}, message)
+        return message
+
+    async def _transfer_to(self, number: str) -> None:
+        assert self._transfer
+        try:
+            await self._transfer(number)
+        except Exception:
+            logger.exception("transfer to %s failed", number)
+            self.session.generate_reply(instructions=self.call.transfer_failed())
+            return
+        self.call.note("transferred to the office")
+        self.call.outcome = self.call.outcome or "transferred"
+        self.call.save()
+
+    @function_tool
+    async def get_pricing(self, context: RunContext, item: str) -> str:
+        """Look up a price before quoting one. Never quote a price that didn't come from here.
+
+        Args:
+            item: What they asked about, in their words.
+        """
+        args = dict(item=item)
+        return self._run("get_pricing", args, lambda: self.call.get_pricing(**args))
+
+
+def transcript_of(history: llm.ChatContext) -> list[dict[str, str]]:
+    lines = []
+    for item in history.items:
+        if item.type == "message" and item.role in ("user", "assistant") and item.text_content:
+            lines.append({"role": item.role, "text": item.text_content})
+        elif item.type == "function_call":
+            lines.append({"role": "tool", "text": f"{item.name} {item.arguments}"})
+    return lines
+
+
+def watch_for_silence(
+    session: AgentSession, call: CallSession, hang_up: Callable[[], Awaitable[None]]
+) -> None:
+    """Check in when the caller goes quiet, and hang up politely if they never come back.
+
+    The session marks the user "away" after `user_away_timeout` seconds of silence
+    and only flips back once they speak, so one task covers a whole quiet spell.
+    """
+    seconds = call.cfg["silence"]["check_in_seconds"]
+    check_ins = CHECK_INS[: call.cfg["silence"]["max_check_ins"]]
+    pending: asyncio.Task | None = None
+
+    async def check_in() -> None:
+        for line in check_ins:
+            session.say(line)
+            await asyncio.sleep(seconds)
+        call.note("caller went silent")
+        await session.say(SILENT_GOODBYE, allow_interruptions=False).wait_for_playout()
+        await hang_up()
+
+    @session.on("user_state_changed")
+    def _on_user_state(event: UserStateChangedEvent) -> None:
+        nonlocal pending
+        if event.new_state == "away" and pending is None:
+            pending = asyncio.create_task(check_in())
+        elif event.new_state != "away" and pending is not None:
+            pending.cancel()
+            pending = None
+
 
 server = AgentServer()
 
 
-class SummitAgent(Agent):
-    def __init__(self) -> None:
-        super().__init__(instructions=INSTRUCTIONS)
-
-    async def on_enter(self) -> None:
-        # Spoken directly rather than generated, so the caller hears us with no LLM delay.
-        self.session.say(GREETING)
-
-
-# agent_name has to match the dispatch rule on the LiveKit phone number.
-@server.rtc_session(agent_name="summit-air")
+@server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext) -> None:
-    session = AgentSession(
-        stt=inference.STT(model="deepgram/nova-3"),
-        llm=inference.LLM(model="openai/gpt-4.1-mini"),
-        tts=inference.TTS(model="cartesia/sonic-3"),
-    )
-    await session.start(agent=SummitAgent(), room=ctx.room)
+    cfg = config.load()
+    store = Store()
+    call_id = uuid.uuid4().hex[:12]
+    ctx.log_context_fields = {"room": ctx.room.name, "call_id": call_id}
+
     await ctx.connect()
+    if ctx.is_fake_job():
+        # Console mode has no phone line, so caller ID comes from the environment.
+        participant = None
+        caller_id = os.getenv("DEMO_CALLER_ID")
+    else:
+        participant = await ctx.wait_for_participant()
+        caller_id = participant.attributes.get("sip.phoneNumber")
+
+    call = CallSession(call_id, caller_id, store, cfg, notifier=Notifier(store))
+    call.prefetch_caller()
+    call.save()
+
+    async def transfer(number: str) -> None:
+        # Needs call transfer (SIP REFER) enabled on the number's trunk.
+        assert participant is not None
+        await ctx.transfer_sip_participant(participant, number)
+
+    session = AgentSession(
+        stt=inference.STT("deepgram/nova-3", language="en"),
+        llm=build_llm(),
+        tts=inference.TTS("cartesia/sonic-3"),
+        turn_handling=TurnHandlingOptions(
+            # Audio turn detection waits through "my number is 516... 555..." without
+            # making short answers like "yes" feel laggy. Falls back to a local model.
+            turn_detection=inference.TurnDetector(),
+            preemptive_generation={"enabled": True},
+        ),
+        max_tool_steps=5,
+        user_away_timeout=cfg["silence"]["check_in_seconds"],
+    )
+
+    # The session's close event and the job's shutdown can both fire; finalize once.
+    finished = False
+
+    def finish() -> None:
+        nonlocal finished
+        if not finished:
+            finished = True
+            call.finalize(transcript_of(session.history))
+
+    def save_transcript(_event: Any) -> None:
+        if not finished:
+            call.save(transcript=transcript_of(session.history))
+
+    session.on("conversation_item_added", save_transcript)
+    session.on("close", lambda _event: finish())
+
+    async def on_shutdown() -> None:
+        finish()
+        store.close()
+
+    async def hang_up() -> None:
+        session.shutdown()
+        await ctx.delete_room()  # disconnects the phone caller too
+
+    ctx.add_shutdown_callback(on_shutdown)
+    watch_for_silence(session, call, hang_up)
+
+    # Krisp needs a real room; console mode just uses the mic as-is.
+    noise_cancellation = None if ctx.is_fake_job() else krisp.voice_isolation_telephony()
+    end_call = EndCallTool(
+        ignore_on_enter=True,
+        end_instructions="Say a short, warm goodbye.",
+        extra_description="Only once the caller's need is handled and they've said goodbye.",
+    )
+
+    await session.start(
+        agent=SummitAgent(call, transfer=transfer if participant else None, tools=[end_call]),
+        room=ctx.room,
+        room_options=room_io.RoomOptions(
+            audio_input=room_io.AudioInputOptions(noise_cancellation=noise_cancellation),
+        ),
+    )
 
 
 if __name__ == "__main__":
