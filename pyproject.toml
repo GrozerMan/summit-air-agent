@@ -1,17 +1,29 @@
 [project]
 name = "summit-air-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "Inbound AI phone agent for Summit Air"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "livekit-agents~=1.8",
+    "livekit-agents~=1.8.9",
+    "livekit-plugins-krisp>=0.4.9,<0.5",  # versioned separately from livekit-agents
     "python-dotenv>=1.0",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-m 'not eval'"
+markers = ["eval: runs the live model; needs LiveKit credentials (uv run pytest evals -m eval)"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
