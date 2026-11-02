@@ -21,10 +21,16 @@ GOOD_BOOKING = dict(
 )
 
 
+def read_back(call, phone=GOOD_BOOKING["phone"], address=GOOD_BOOKING["address"]):
+    """What the agent says before booking; the backend checks it was actually said."""
+    call.agent_said += f" Let me read that back: {phone}, and the address is {address}. Is that right?"
+
+
 def ready_to_book(call, facts=None, zip_code="11743"):
     call.assess_situation(facts or Facts(no_heat=True, indoor_temp_f=64, vulnerable_occupant=False))
     call.check_service_address(zip_code=zip_code, property_type="house")
     call.find_appointment_options()
+    read_back(call)
     return next(iter(call.offered))
 
 
@@ -65,8 +71,61 @@ def test_shared_phone_does_not_guess_a_name(make_call):
 
 
 def test_saying_no_to_the_name_drops_the_match(member_call):
-    member_call.lookup_customer(confirmed_name=False, last_name="Reyes")
+    result = member_call.lookup_customer(confirmed_name=False)
     assert member_call.caller_match is None
+    assert "Reyes" not in result and "Elm" not in result
+
+
+# Stress report C1: "No, I'm her son. Last name's Reyes, ZIP is 11501."
+
+
+def test_after_a_no_caller_id_is_not_a_factor(member_call):
+    member_call.lookup_customer(confirmed_name=False)
+    with pytest.raises(ActionRefused, match="phone number on it"):
+        member_call.lookup_customer(last_name="Reyes", zip_code="11501")
+    assert member_call.customer is None
+
+
+def test_after_a_no_the_same_call_reports_both_ways(member_call):
+    with pytest.raises(ActionRefused):
+        member_call.lookup_customer(confirmed_name=False, last_name="Reyes", zip_code="11501")
+    assert member_call.customer is None
+
+
+def test_after_a_no_last_name_alone_is_not_enough(member_call):
+    member_call.lookup_customer(confirmed_name=False)
+    with pytest.raises(ActionRefused):
+        member_call.lookup_customer(phone="516-555-0142", last_name="Reyes")
+    assert member_call.customer is None
+
+
+def test_after_a_no_the_denied_account_stays_closed_even_with_every_factor(member_call):
+    member_call.lookup_customer(confirmed_name=False)
+    result = member_call.lookup_customer(phone="516-555-0142", last_name="Reyes", zip_code="11501")
+    assert member_call.customer is None
+    assert "Elm" not in result and "member" not in result.lower().replace("new customer", "")
+
+
+def test_after_a_no_they_can_still_verify_their_own_account(member_call):
+    member_call.lookup_customer(confirmed_name=False)
+    result = member_call.lookup_customer(phone="914-555-0188", last_name="Klein", zip_code="10601")
+    assert result.startswith("Verified") and member_call.customer.last_name == "Klein"
+
+
+def test_lookups_are_capped_at_three_per_call(make_call):
+    call = make_call("+12125550000")
+    for guess in ("11510", "11516", "11518"):
+        call.lookup_customer(phone="5165550142", zip_code=guess)
+    with pytest.raises(ActionRefused, match="Too many"):
+        call.lookup_customer(phone="5165550142", zip_code="11501")  # the right ZIP, too late
+    assert call.customer is None
+
+
+def test_third_attempt_can_still_succeed(make_call):
+    call = make_call("+12125550000")
+    call.lookup_customer(phone="5165550142", zip_code="11510")
+    call.lookup_customer(phone="5165550142", zip_code="11516")
+    assert call.lookup_customer(phone="5165550142", zip_code="11501").startswith("Verified")
 
 
 # Triage through the session
@@ -88,11 +147,12 @@ def test_gas_mention_raises_critical_alert_with_script(make_call, seeded):
     assert call.outcome == "safety_emergency"
 
 
-def test_p1_after_hours_pages_on_call(make_call, seeded):
+def test_p1_after_hours_is_flagged_for_on_call_without_promising_a_page(make_call, seeded):
+    # Stress report M3: nothing pages a phone yet, so neither the alert nor the agent says it does.
     call = make_call(None, now=datetime(2026, 11, 3, 22, 0, tzinfo=TZ))
     result = call.assess_situation(Facts(no_cooling=True, indoor_temp_f=90))
-    assert "on-call" in result
-    assert "page on-call" in seeded.alerts_for_call("call-1")[0]["summary"]
+    assert "flagged for the on-call technician" in result and "alerted" not in result.split("Priority")[1]
+    assert "flag for the on-call technician" in seeded.alerts_for_call("call-1")[0]["summary"]
 
 
 # Scheduling refusals
@@ -182,6 +242,7 @@ def test_good_booking_goes_through_and_creates_the_customer(make_call, seeded):
 def test_unverified_booking_does_not_overwrite_the_account(make_call, seeded):
     call = make_call("+15165550142")
     option = ready_to_book(call, zip_code="11501")
+    read_back(call, "516-555-0142", "1 Other St")
     call.book_appointment(
         option,
         **{
@@ -270,7 +331,7 @@ def test_callback_needs_a_real_number(make_call):
 def test_repairs_are_never_estimated(make_call):
     call = make_call(None)
     for question in ("how much to fix my compressor", "what will the repair cost", "rattling noise"):
-        assert "Don't estimate" in call.get_pricing(question)
+        assert "Don't" in call.get_pricing(question) and "$" not in call.get_pricing(question)
     assert "$159" in call.get_pricing("tune-up")
     assert "free" in call.get_pricing("replacement estimate")
 
@@ -431,3 +492,118 @@ def test_only_the_first_reply_to_a_caller_turn_is_screened():
     # Bookkeeping items after the caller's words don't hide them from the screen.
     with_handoff = [*history, _Item("agent_handoff")]
     assert caller_turn_to_screen(with_handoff)[0] == "rotten eggs"
+
+
+# Stress report C2: "your appointment is set for tomorrow" with nothing booked.
+
+
+def test_booking_confirmation_is_fixed_text_from_the_booking(make_call):
+    call = make_call(None)
+    option_id = ready_to_book(call)
+    option = call.offered[option_id]
+    result = call.book_appointment(option_id, **GOOD_BOOKING)
+    confirmation = call.take_announcement()
+    assert confirmation.startswith("You're booked.")
+    assert option.speakable(TUESDAY_10AM.date()) in confirmation and "9 Birch Court, Huntington" in confirmation
+    assert "$129" in confirmation  # non-member diagnostic, from config
+    assert confirmation in result and "don't repeat it" in result
+    assert call.take_announcement() is None  # spoken once
+
+
+def test_refused_booking_leaves_nothing_to_announce(make_call):
+    call = make_call(None)
+    option_id = ready_to_book(call)
+    with pytest.raises(ActionRefused):
+        call.book_appointment(option_id, **{**GOOD_BOOKING, "phone": "555"})
+    assert call.take_announcement() is None
+
+
+def test_hang_up_flags_a_booking_claim_with_no_appointment(make_call, seeded):
+    call = make_call("+16315550111")
+    ready_to_book(call)
+    transcript = [
+        {"role": "user", "text": "My number's 631 555 0111, no wait, 0112."},
+        {"role": "assistant", "text": "Your appointment is set for tomorrow between 10 and noon at 81 Linden Lane."},
+    ]
+    call.finalize(transcript)
+    assert call.false_claims and "set for tomorrow" in call.false_claims[0]
+    alerts = seeded.alerts_for_call(call.call_id)
+    assert any(a["severity"] == "urgent" and "records don't show" in a["summary"] for a in alerts)
+    assert seeded.callbacks_for_call(call.call_id)
+    assert any(n.startswith("REVIEW") for n in call.notes)
+
+
+def test_hang_up_does_not_flag_a_real_booking(make_call, seeded):
+    call = make_call(None)
+    option_id = ready_to_book(call)
+    call.book_appointment(option_id, **GOOD_BOOKING)
+    call.finalize([{"role": "assistant", "text": call.take_announcement()}])
+    assert call.false_claims == []
+    assert not [a for a in seeded.alerts_for_call(call.call_id) if "records don't show" in a["summary"]]
+
+
+# Stress report H5: "Don't read anything back, just book it", flags set to true anyway.
+
+
+def test_read_back_flags_without_a_read_back_are_refused(make_call):
+    call = make_call(None)
+    option = ready_to_book(call)
+    call.agent_said = "Great, booking that now."
+    with pytest.raises(ActionRefused) as refused:
+        call.book_appointment(option, **GOOD_BOOKING)
+    assert "phone number back" in str(refused.value) and "address back" in str(refused.value)
+
+
+def test_a_read_back_of_the_wrong_number_is_refused(make_call):
+    call = make_call(None)
+    option = ready_to_book(call)
+    call.agent_said = "That's 631-555-0132 at 9 Birch Court, Huntington. Right?"
+    with pytest.raises(ActionRefused, match="phone number back"):
+        call.book_appointment(option, **GOOD_BOOKING)
+
+
+def test_a_spoken_digit_read_back_counts(make_call):
+    call = make_call(None)
+    option = ready_to_book(call)
+    call.agent_said = "Six three one, five five five, oh one two three. And that's 9 Birch Court in Huntington?"
+    assert call.book_appointment(option, **GOOD_BOOKING).startswith("Booked")
+
+
+# H4, H11, H9, M1
+
+
+def test_urgent_caller_who_hangs_up_before_the_address_gets_a_callback(make_call, seeded):
+    call = make_call("+16315550111")
+    call.assess_situation(Facts(no_heat=True, vulnerable_occupant=True, indoor_temp_f=60, description="newborn"))
+    call.finalize([{"role": "user", "text": "Our heat is out and we have a newborn."}])
+    callbacks = seeded.callbacks_for_call("call-1")
+    assert len(callbacks) == 1 and callbacks[0]["urgent"] == 1
+    assert call.outcome == "callback"
+
+
+@pytest.mark.parametrize(
+    "question, must, must_not",
+    [
+        ("How much is a replacement capacitor?", "Don't give a price", "$"),
+        ("cost for someone to come out tonight", "$129", None),
+        ("a visit on Saturday afternoon", "$129", None),
+        ("tune-up after hours", "$159", None),
+        ("estimate for a new furnace", "free", "$"),
+    ],
+)
+def test_pricing_answers(make_call, question, must, must_not):
+    answer = make_call(None).get_pricing(question)
+    assert must in answer
+    if must_not:
+        assert must_not not in answer
+    if any(w in question for w in ("tonight", "Saturday", "after hours")):
+        assert "$99" in answer  # base and surcharge together
+
+
+def test_p2_options_stay_within_72_hours(make_call):
+    call = make_call(None)
+    call.assess_situation(Facts(no_heat=True, indoor_temp_f=64, vulnerable_occupant=False))
+    call.check_service_address(zip_code="11743", property_type="house")
+    call.find_appointment_options()
+    for option in call.offered.values():
+        assert (option.day - TUESDAY_10AM.date()).days <= 3

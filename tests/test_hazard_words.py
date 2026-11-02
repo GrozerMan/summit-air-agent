@@ -4,7 +4,7 @@ whenever a test call finds a new way to say it."""
 
 import pytest
 
-from summit.hazard_words import cannot_leave, hazard_in
+from summit.hazard_words import cannot_leave, hazard_in, leaving
 from summit.speech import say_hotline
 
 MUST_CATCH_GAS = [
@@ -28,6 +28,24 @@ MUST_CATCH_GAS = [
     "smells like the gas stove when you leave it on",
     "there's a smell by the gas meter",
     "a weird smell near the gas line",
+    # Stress report M4: negation words that aren't denials of the smell.
+    "It won't stop smelling like gas",
+    "I can't stand the rotten egg smell in the basement",
+    "I can't get rid of this gas smell",
+    "We can't figure out where the gas smell is coming from",
+    "The heat won't come on without a weird gas smell",
+    # A denial of now is an admission of earlier.
+    "It doesn't smell like gas now, but it did this morning",
+    "I don't smell gas anymore. I did earlier though",
+    "There's no gas smell now but there was one an hour ago",
+    "I no longer smell gas",
+    # Other phrasings the stress run found.
+    "I think the gas is leaking",
+    "smells eggy down by the furnace",
+    "I wondered if it might be gas",
+    "I asked my husband if he smelled gas",  # asked, never answered: still counts
+    "I asked my wife if it smells like gas and she said yes",
+    "it smells like a skunk in the basement",
 ]
 
 MUST_NOT_FIRE = [
@@ -44,6 +62,12 @@ MUST_NOT_FIRE = [
     "There's no smell of gas",
     "I never smelled propane",
     "Do you service gas water heaters?",
+    # Stress report H1: a question that got a no.
+    "I asked my wife if it smells like gas and she said no, it's just a dusty smell. The heat's working, "
+    "it's 68 inside. Can I get a tune-up?",
+    "Asked if it smells like gas or rotten eggs; caller said it's just dusty",
+    "There's a skunk living under my porch and my AC is broken",
+    "it might be the gas furnace",
     "",
 ]
 
@@ -68,6 +92,83 @@ def test_ordinary_calls_do_not_fire(text):
 )
 def test_sounding_co_alarm_is_caught(text):
     assert hazard_in(text) == "co"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Stress report C3: 6 of 8 CO phrasings used to miss.
+        "my CO detector is going crazy",
+        "the detector for carbon monoxide keeps beeping",
+        "the alarm that says CO on it is going off",
+        "carbon monoxide alarm",
+        "we all have headaches and the kids are dizzy",
+        "the whole family's been really sleepy and nauseous since the heat came on",
+        "I've been dizzy and nauseous all day",
+    ],
+)
+def test_co_wording_and_symptoms_are_caught(text):
+    assert hazard_in(text) == "co"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "this AC is giving me a headache",
+        "I have a CO alarm",
+        "my carbon monoxide alarm needs a new battery",
+        "do you install carbon monoxide alarms",
+        "nobody has a headache or feels dizzy",
+        "no, no headaches or dizziness",
+    ],
+)
+def test_co_mentions_that_are_not_an_alarm_or_symptoms(text):
+    assert hazard_in(text) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Stress report C3: P0 in only 3/6 live runs, because nothing but the model saw it.
+        "My AC outdoor unit was sparking and now it keeps tripping the breaker",
+        "it's not sparking now but it was earlier",
+        "there's smoke coming from the vent",
+        "there was a little smoke when it turned on",
+        "I saw flames in the furnace",
+        "I saw a flame coming out of the furnace door",
+        "the furnace caught fire",
+        "there's a fire in the basement",
+        "the outlet sparked",
+        "the smoke alarm is going off",
+    ],
+)
+def test_smoke_sparks_and_flames_are_caught(text):
+    assert hazard_in(text) == "fire"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # HVAC words that only look like fire.
+        "the furnace won't fire",
+        "it tries to fire but then shuts off",
+        "the burner will fire and then shut off",
+        "the boiler won't fire up",
+        "it fires up then quits",
+        "the igniter sparks but it won't light",
+        "my smoke detector is chirping",
+        "the flame keeps going out",
+        "the flame sensor might be dirty",
+        "is a space heater a fire hazard",
+        # Denials.
+        "no smoke or sparks, it just won't turn on",
+        "No sparks, no smoke, nothing like that",
+        "I haven't seen any smoke",
+        "caller denies smoke or sparks",
+    ],
+)
+def test_hvac_fire_words_and_denials_do_not_fire(text):
+    assert hazard_in(text) is None
 
 
 @pytest.mark.parametrize(
@@ -107,6 +208,16 @@ def test_cannot_leave(text):
 )
 def test_leaving_or_asking_is_not_cannot_leave(text):
     assert not cannot_leave(text)
+
+
+@pytest.mark.parametrize("text", ["Okay, I'm going outside now. Bye.", "Goodbye", "We're leaving now"])
+def test_leaving(text):
+    assert leaving(text)
+
+
+@pytest.mark.parametrize("text", ["I can't leave, my mom is in a wheelchair", "what do I do", "Should I leave?"])
+def test_not_leaving(text):
+    assert not leaving(text)
 
 
 def test_hotline_is_spelled_for_tts():
