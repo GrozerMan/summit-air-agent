@@ -146,6 +146,7 @@ def test_co_mentions_that_are_not_an_alarm_or_symptoms(text):
         "it smells smoky in the basement",
         "smoke coming from the fireplace into the room",
         "there is a fire near the furnace",
+        "the fire alarm is going off",
     ],
 )
 def test_smoke_sparks_and_flames_are_caught(text):
@@ -180,6 +181,15 @@ def test_smoke_sparks_and_flames_are_caught(text):
         "smells like cigarette smoke in the vents",
         "there was a fire in the fireplace and now the heat stopped",
         "we had a fire going in the wood stove",
+        # Round-2 stress probes.
+        "Nothing's sparking right now, it just won't heat.",
+        "My fire alarm keeps chirping, and separately the AC needs a tune-up.",
+        "I live on Fire Island, can you do a furnace tune-up?",
+        "The burner flames look nice and blue, but the blower is loud.",
+        "It clicks and sparks but won't light, and the heat's off.",
+        "First time running the heat this year and it smells a bit smoky, like burnt dust.",
+        "Can you do the smoke test on my ducts?",
+        "My neighbor's house had a fire last year so I want my furnace checked.",
     ],
 )
 def test_hvac_fire_words_and_denials_do_not_fire(text):
@@ -238,3 +248,29 @@ def test_not_leaving(text):
 def test_hotline_is_spelled_for_tts():
     assert say_hotline("1-800-490-0045") == "one, eight hundred, four nine zero, zero zero four five"
     assert say_hotline("1-800-752-6633") == "one, eight hundred, seven five two, six six three three"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # The agent asks "any gas smell right now?" and the answer is a plain no.
+        "No, I don't smell gas right now.",
+        "No, I don't smell any gas at the moment, it's just cold.",
+        "This furnace is giving me a headache, it keeps short cycling.",
+    ],
+)
+def test_plain_answers_and_figures_of_speech_do_not_fire(text):
+    assert hazard_in(text) is None
+
+
+@pytest.mark.parametrize(
+    "text, hazard",
+    [
+        ("there's like a sewer smell coming from the furnace room", "gas"),
+        ("the pilot light went out and now there's a weird smell", "gas"),
+        ("my carbon monoxide detector says 'CO' and is beeping", "co"),
+        ("the CO thing on the wall keeps going off", "co"),
+    ],
+)
+def test_round_two_misses_are_caught(text, hazard):
+    assert hazard_in(text) == hazard
