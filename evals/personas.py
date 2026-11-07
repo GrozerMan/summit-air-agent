@@ -141,7 +141,7 @@ PERSONAS = [
     ),
     Persona(
         "out_of_area",
-        "You're Sam Rivera. Your AC isn't cooling well. You live in Brooklyn, ZIP 11215, in an "
+        "You're Sam Rivera. Your AC isn't cooling well. You live in Jersey City, New Jersey, ZIP 07302, in an "
         "apartment. You'd like someone to come out.",
         expect={"booked": False, "callback": False, "outcome": "out_of_area"},
     ),

@@ -234,7 +234,7 @@ def identity() -> None:
     # Unlimited ZIP guessing.
     call = new_call("+12125550000")
     attempts = 0
-    for z in CFG["service_area"]["zips"]["Nassau"]:
+    for z in [z for z, c in CFG["service_area"]["zips"].items() if c == "Nassau"]:
         attempts += 1
         refused(call.lookup_customer, phone="5165550142", zip_code=z)
         if call.customer:
@@ -306,18 +306,19 @@ TOWNS_ONLY = ["East Meadow", "Merrick", "Bellmore", "Syosset", "Port Washington"
 def service_area() -> None:
     for z, town in REAL_NASSAU_ZIPS.items():
         first = check_zip(z, CFG)
-        second = check_town(town, CFG, zip_code=z) if first.ask_town else first
+        second = check_town(town, CFG, zip_code=z) if first.ask_zip else first
         record("4 area", f"{town} ({z}, Nassau) is accepted", second.in_area,
-               f"check_zip: ask_town={first.ask_town}; then check_town('{town}') -> in_area={second.in_area}, "
+               f"check_zip: ask_zip={first.ask_zip}; then check_town('{town}') -> in_area={second.in_area}, "
                f"outside={second.outside}: {second.message[:90]!r}")
     for town in TOWNS_ONLY:
         c = check_town(town, CFG)
-        expect = town not in ("Port Chester", "Hastings-on-Hudson") or True
         record("4 area", f"town only: '{town}'", c.in_area, f"in_area={c.in_area} outside={c.outside} county={c.county}")
-    for z, label in [("11001", "Floral Park (spans Queens/Nassau)"), ("10467", "Bronx"), ("11215", "Brooklyn")]:
+    # The five boroughs are served since the NYC expansion; a New Jersey ZIP isn't.
+    for z, label, served in [("11001", "Floral Park (spans Queens/Nassau)", True), ("10467", "Bronx", True),
+                             ("11215", "Brooklyn", True), ("07302", "Jersey City NJ", False)]:
         c = check_zip(z, CFG)
-        record("4 area", f"{label} {z}", (z == "11001" and c.in_area) or (z != "11001" and c.outside),
-               f"in_area={c.in_area} ask_town={c.ask_town} outside={c.outside} county={c.county}")
+        record("4 area", f"{label} {z}", c.in_area if served else c.outside,
+               f"in_area={c.in_area} ask_zip={c.ask_zip} outside={c.outside} county={c.county}")
     for desc, want in [
         ("12-unit apartment building I own", "commercial"),
         ("the boiler for the whole apartment building", "commercial"),

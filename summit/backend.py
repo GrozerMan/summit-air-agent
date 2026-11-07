@@ -14,7 +14,7 @@ from summit import config
 from summit.models import Appointment, Customer, Membership, Priority
 from summit.notify import Notifier
 from summit.scheduling import AppointmentChanged, Option, Scheduler, say_day, say_window
-from summit.service_area import AreaCheck, check_town, check_zip, property_kind
+from summit.service_area import AreaCheck, area_name, check_town, check_zip, place_in, property_kind
 from summit.speech import normalize_phone, normalize_zip, say_phone, spoken_digits
 from summit.store import Store
 from summit.claims import false_claims
@@ -252,7 +252,7 @@ class CallSession:
     def _account_summary(self) -> str:
         c = self.customer
         assert c is not None
-        lines = [f"{c.full_name}, {c.address}, ZIP {c.zip} ({c.county} County)."]
+        lines = [f"{c.full_name}, {c.address}, ZIP {c.zip} ({area_name(c.county, self.cfg)})."]
         if c.membership == Membership.ACTIVE:
             lines.append(f"Active {self.cfg['membership']['name']} member: thank them for being a member.")
         elif c.membership == Membership.LAPSED:
@@ -306,7 +306,7 @@ class CallSession:
         if self.hazard_place and not self.area:
             place = " ".join(v for k, v in self.hazard_place.items() if k in ("town", "zip"))
             county = self.hazard_place.get("county")
-            alert += f". Location given: {place}" + (f" ({county} County)" if county else "")
+            alert += f". Location given: {place}" + (f" ({area_name(county, self.cfg)})" if county else "")
         if self.facts.description:
             alert += f'. Caller said: "{self.facts.description[-300:]}"'
         if held:
@@ -358,15 +358,17 @@ class CallSession:
             if not hazard_in(sentence):
                 continue
             place: dict[str, str] = {}
-            for name, county in self.cfg["service_area"]["towns"].items():
-                if re.search(rf"\b{re.escape(name)}\b", sentence, re.I):
-                    place.update(town=name, county=county)
-                    break
+            named = place_in(sentence, self.cfg)
+            if named:
+                place["town"] = named[0]
+                if named[1]:
+                    place["county"] = named[1]
             zip_match = re.search(r"\b\d{5}\b", sentence)
             if zip_match:
                 place["zip"] = zip_match[0]
                 check = check_zip(zip_match[0], self.cfg)
                 if check.in_area and check.county:
+                    # A ZIP is more precise than a town name.
                     place["county"] = check.county
             if place:
                 return place
@@ -495,8 +497,9 @@ class CallSession:
 
         if zip_code:
             check = check_zip(zip_code, self.cfg)
-            if check.ask_town and town:
-                check = check_town(town, self.cfg, zip_code=check.zip)
+            if check.zip is None and town:
+                # The ZIP didn't come through; the town may still settle it.
+                check = check_town(town, self.cfg)
         elif town:
             check = check_town(town, self.cfg)
         else:
@@ -738,8 +741,8 @@ class CallSession:
         if self.property != "residential":
             return "the property isn't confirmed as a home"
         if self.area is None or self.area.county != option.county:
-            where = f"{self.area.county} County" if self.area and self.area.county else "no checked address"
-            return f"that window is for {option.county} County and the address is now {where}"
+            where = area_name(self.area.county, self.cfg) if self.area and self.area.county else "no checked address"
+            return f"that window is for {area_name(option.county, self.cfg)} and the address is now {where}"
         assert self.assessment
         return self.scheduler.still_fits(option, self.assessment.priority, self.is_member, self.now())
 
@@ -1085,5 +1088,5 @@ class CallSession:
         else:
             name = "unknown caller"
         phone = say_phone(self.callback_phone) if self.callback_phone else "no number"
-        place = f", {self.area.county} County" if self.area and self.area.county else ""
+        place = f", {area_name(self.area.county, self.cfg)}" if self.area and self.area.county else ""
         return f"{name} ({phone}{place})"

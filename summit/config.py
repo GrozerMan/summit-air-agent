@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config" / "business.toml"
+AREA_PATH = ROOT / "config" / "service_area.csv"
 
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
@@ -17,6 +18,10 @@ def load(path: Path = CONFIG_PATH) -> dict[str, Any]:
     with open(path, "rb") as f:
         cfg = tomllib.load(f)
 
+    # Imported here: service_area is a leaf module, but config is imported everywhere.
+    from summit.service_area import load_area
+
+    load_area(cfg, AREA_PATH)
     transfer = os.getenv("HUMAN_TRANSFER_NUMBER")
     if transfer:
         cfg["escalation"]["human_transfer_number"] = transfer

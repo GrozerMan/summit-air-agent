@@ -76,10 +76,10 @@ async def test_account_details_need_verification():
 
 
 async def test_out_of_area_caller_hears_a_kind_no():
-    call, result = await first_turn("My AC died. I'm in an apartment in Brooklyn, 11215.")
+    call, result = await first_turn("My AC died. I'm in an apartment in Jersey City, 07302.")
     result.expect.contains_function_call(name="check_service_address")
     assert not call.booked
     async with inference.LLM(JUDGE_MODEL) as judge:
         await result.expect.contains_message(role="assistant").judge(
-            judge, intent="Kindly says Brooklyn is outside the service area. Doesn't offer to book."
+            judge, intent="Kindly says Jersey City is outside the service area. Doesn't offer to book."
         )

@@ -176,7 +176,7 @@ def test_no_options_on_p0(make_call):
 def test_no_options_out_of_area(make_call):
     call = make_call(None)
     call.assess_situation(Facts(request_type="tune_up"))
-    call.check_service_address(zip_code="11215", property_type="house")
+    call.check_service_address(zip_code="07030", property_type="house")  # Hoboken NJ
     with pytest.raises(ActionRefused, match="service address"):
         call.find_appointment_options()
     assert call.outcome == "out_of_area"
@@ -358,14 +358,14 @@ def test_every_tool_call_is_saved_as_it_happens(make_call, seeded):
 
 def test_out_of_area_town_without_a_zip_is_recorded(make_call):
     call = make_call(None)
-    call.check_service_address(town="Hoboken", property_type="house")
+    call.check_service_address(town="Hoboken, NJ", property_type="house")
     assert call.outcome == "out_of_area"
 
 
 def test_turning_away_never_overwrites_a_safety_emergency(make_call):
     call = make_call(None)
     call.assess_situation(Facts(gas_smell=True))
-    call.check_service_address(zip_code="11215", property_type="house")
+    call.check_service_address(zip_code="07030", property_type="house")  # Hoboken NJ
     assert call.outcome == "safety_emergency"
 
 
