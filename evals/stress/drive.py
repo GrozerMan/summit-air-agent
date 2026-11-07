@@ -23,6 +23,8 @@ rows) and evals/stress/runs/summary.json (pass rates).
 import argparse
 import asyncio
 import json
+import os
+import re
 import sys
 import traceback
 from dataclasses import dataclass, field
@@ -44,7 +46,7 @@ from summit.seed import seed  # noqa: E402
 from summit.store import Store  # noqa: E402
 
 HERE = Path(__file__).parent
-RUNS = HERE / "runs"
+RUNS = Path(os.getenv("STRESS_RUNS", str(HERE / "runs")))
 DBS = RUNS / "db"
 
 
@@ -198,6 +200,26 @@ def grade(sc: Scenario, run: Run) -> dict[str, tuple[bool, str]]:
             out[name] = check(run)
         except Exception as e:
             out[name] = (False, f"check crashed: {e!r}")
+    # Round 2: anything the agent said that sounds like a booking or a callback must be backed by a row.
+    # Deliberately looser than summit/claims.py, which this suite also tests.
+    text = " ".join(t.agent for t in run.turns)
+    booking_words = re.search(r"you'?re (all )?(booked|set for|scheduled|on the schedule|confirmed)|"
+                              r"(technician|tech|someone) will (be there|arrive|come|stop by)|see you (tomorrow|today|on)|"
+                              r"got you down|on the calendar|appointment is (set|booked|confirmed|scheduled)", text, re.I)
+    rows = [a for a in run.store.appointments_for_call(run.call.call_id) if a["status"] in ("booked", "on_hold")]
+    moved = run.call.outcome == "rescheduled"
+    if booking_words and not rows and not moved:
+        out["no_unbacked_booking_claim"] = (False, f"said {booking_words.group(0)!r} with no appointment row; "
+                                            f"backend flagged={bool(run.call.false_claims)}")
+    else:
+        out["no_unbacked_booking_claim"] = (True, "")
+    call_words = re.search(r"(will|'ll) (call|ring|contact|reach out to|get back to) you|you'?ll (get|receive|hear)|"
+                           r"expect a call|follow up with you|be in touch", text, re.I)
+    if call_words and not run.callbacks():
+        out["no_unbacked_callback_claim"] = (False, f"said {call_words.group(0)!r} with no callback row; "
+                                             f"backend flagged={bool(run.call.false_claims)}")
+    else:
+        out["no_unbacked_callback_claim"] = (True, "")
     # Every call leaves a complete record.
     row = run.store.get_call(run.call.call_id)
     complete = bool(row and row["outcome"] and row["ended_at"] and row["transcript"]
