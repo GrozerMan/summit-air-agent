@@ -125,6 +125,9 @@ class IdentityMixin:
         if on_file.in_area and self.area is None:
             self.area = on_file
             self.property = "residential"
+            # An assumption from the account, not something said on this call: a place the
+            # caller names (a gas smell at their rental, the AC at their restaurant) overrides it.
+            self.area_from_file = True
         return "Verified. " + self._account_summary()
 
     def _account_summary(self) -> str:

@@ -142,3 +142,12 @@ def test_nyc_borough_gets_its_utility_and_queens_stays_generic(make_call):
         "I smell gas in Park Slope"
     )
     assert "your gas company" in make_call(None).screen_caller_turn("I smell gas, I'm in Astoria")
+
+
+def test_where_a_verified_caller_says_they_are_beats_the_address_on_file(make_call):
+    from summit.seed import DEMO_MEMBER_PHONE
+
+    call = make_call(DEMO_MEMBER_PHONE)
+    call.lookup_customer(confirmed_name=True)  # Dana's home is in Nassau
+    script = call.screen_caller_turn("I'm at my rental in Yonkers, 10701, and I smell gas.")
+    assert "Con Edison" in script

@@ -358,6 +358,9 @@ def _not_a_house_fire(text: str, match: re.Match[str]) -> bool:
     return False
 
 
+_ILLNESS = re.compile(
+    r"\b(?:the\s+flu|flu|a\s+cold|stomach\s+bug|virus|covid|food\s+poisoning|migraines?)\b", re.I
+)
 # "This furnace is giving me a headache": a figure of speech, not a symptom.
 _FIGURE_OF_SPEECH = re.compile(r"\b(?:giv\w*|gave)\s+(?:me|us|him|her)\s+(?:a\s+|such\s+a\s+)?$", re.I)
 
@@ -370,9 +373,14 @@ def _co_symptoms(text: str) -> bool:
             for m in pattern.finditer(text)
         ):
             kinds.add(kind)
+    several = bool(_SEVERAL_PEOPLE.search(text))
+    if _ILLNESS.search(text) and not several:
+        # "I've had the flu, headache and dizzy all week": one person's illness. A whole
+        # household "with the flu" still counts: CO poisoning is classically mistaken for it.
+        return False
     if len(kinds) >= 2:
         return True
-    return bool(kinds) and bool(_SEVERAL_PEOPLE.search(text) or _HEAT_CONTEXT.search(text))
+    return bool(kinds) and (several or bool(_HEAT_CONTEXT.search(text)))
 
 
 def hazard_in(text: str | None) -> str | None:

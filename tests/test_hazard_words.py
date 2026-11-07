@@ -276,3 +276,12 @@ def test_plain_answers_and_figures_of_speech_do_not_fire(text):
 )
 def test_round_two_misses_are_caught(text, hazard):
     assert hazard_in(text) == hazard
+
+
+def test_one_persons_flu_is_not_co_but_a_sick_household_still_is():
+    assert hazard_in("I've had the flu, headache and dizzy all week, and now the AC died.") is None
+    # CO poisoning is classically mistaken for a family-wide flu: this stays P0 on purpose.
+    assert (
+        hazard_in("The heat's out and the kids have a stomach bug, they've been throwing up all night.")
+        == "co"
+    )

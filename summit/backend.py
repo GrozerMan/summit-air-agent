@@ -69,6 +69,7 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         self.p0_script: str | None = None  # the script as first read, so it's read once
         self.caller_leaving = False
         self.area: AreaCheck | None = None
+        self.area_from_file = False  # set from the verified account, not said on this call
         self.property = "unknown"
         # The heat or cooling comes from the building's own plant (an NYC rental with a
         # boiler in the basement): the landlord's job, not a visit we can book.
@@ -123,6 +124,7 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         heat_from_building: bool | None = None,
     ) -> str:
         before = (self.area and (self.area.county, self.area.zip), self.property, self.building_system)
+        self.area_from_file = False
         if heat_from_building is not None:
             self.building_system = heat_from_building
         message = self._check_service_address(zip_code, town, property_type)
@@ -429,7 +431,7 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         said = self.agent_said.lower()
         number = words[0] if words[0][0].isdigit() else None
         street = next((w for w in words[1:] if not w.isdigit() and len(w) > 1), None) if number else words[0]
-        if number and not re.search(rf"\b{number}\b", said):
+        if number and not re.search(rf"\b{number}\b", said) and number not in spoken_digits(said):
             return False
         return street is None or re.search(rf"\b{re.escape(street)}\b", said) is not None
 

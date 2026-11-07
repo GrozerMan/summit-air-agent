@@ -20,6 +20,7 @@ _COMMERCIAL_WORDS = (
     "school", "church", "factory", "hotel", "clinic", "salon", "gym", "rooftop unit", "rtu",
     "building-wide", "whole building", "central plant", "landlord", "property manager",
     "management company", "the building's boiler", "building boiler", "my tenants", "our tenants",
+    "whole apartment building", "entire building", "entire apartment building",
 )  # fmt: skip
 _RESIDENTIAL_WORDS = (
     "house", "home", "condo", "apartment", "unit", "townhouse", "two-family",
@@ -223,9 +224,13 @@ def _out_of_area(zip_code: str | None, cfg: dict[str, Any], place: str | None = 
     )
 
 
+# "apartment above a store": the home is the subject, the shop is where it is.
+_ABOVE_A_BUSINESS = re.compile(r"\b(?:above|over|behind|next\s+to)\s+(?:a|an|the|my)\s+\w+(?:\s+\w+)?", re.I)
+
+
 def property_kind(description: str) -> str:
     """'residential', 'commercial' or 'unknown'. Homes of up to four units count as residential."""
-    text = description.lower()
+    text = _ABOVE_A_BUSINESS.sub(" ", description.lower())
     if _mentions(text, _COMMERCIAL_WORDS) or _too_many_units(text):
         return "commercial"
     if _mentions(text, _RESIDENTIAL_WORDS):

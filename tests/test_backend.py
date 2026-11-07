@@ -737,3 +737,26 @@ def test_a_call_whose_worker_died_is_closed_and_followed_up(make_call, seeded, c
     callbacks = seeded.callbacks_for_call("died")
     assert len(callbacks) == 1 and callbacks[0]["urgent"]
     assert close_abandoned_calls(seeded, cfg, TUESDAY_10AM + timedelta(minutes=50)) == 0
+
+
+def test_a_verified_member_at_their_restaurant_has_to_check_the_address(member_call):
+    member_call.lookup_customer(confirmed_name=True)  # address on file: a home in Nassau
+    member_call.assess_situation(
+        Facts(
+            no_cooling=True,
+            indoor_temp_f=80,
+            vulnerable_occupant=False,
+            description="the AC at my restaurant stopped",
+        )
+    )
+    with pytest.raises(ActionRefused, match="service address"):
+        member_call.find_appointment_options()
+
+
+def test_a_house_number_read_back_in_words_counts(make_call):
+    call = make_call(None)
+    option = ready_to_book(call)
+    call.agent_said = (
+        "That's six three one, five fifty-five, oh one two three, at nine Birch Court, Huntington?"
+    )
+    assert call.book_appointment(option, **GOOD_BOOKING).startswith("Booked")

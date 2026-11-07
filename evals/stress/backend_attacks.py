@@ -639,10 +639,12 @@ def records() -> None:
     call = new_call("+16315550111")
     via_agent(call, "assess_situation", call.assess_situation, facts=Facts(no_heat=True, indoor_temp_f=55, description="no heat, 55 inside"))
     via_agent(call, "check_service_address", call.check_service_address, zip_code="11706", property_type="house")
-    # SIGKILL here: finalize() never runs.
+    # SIGKILL here: finalize() never runs. The next call to start runs the recovery (M2).
+    from summit.records import close_abandoned_calls
+    close_abandoned_calls(call.store, CFG, TUE_10AM + timedelta(minutes=45))
     row = call.store.get_call("stress")
     record("9 records", "worker killed mid-call: partial record saved AND the unbooked P1 still gets followed up",
-           row is not None and row["outcome"] is not None,
+           row is not None and row["outcome"] is not None and bool(call.store.callbacks_for_call("stress")),
            f"row saved: priority=P{row['priority']} outcome={row['outcome']} ended_at={row['ended_at']} "
            f"tools={len(row['record']['tools'])}; no callback, outcome stays NULL -> 'in progress' forever")
 

@@ -136,3 +136,8 @@ def test_building_owners_are_commercial_but_residents_are_not(description, kind)
 )
 def test_phone_numbers_in_tens_and_with_corrections(spoken, number):
     assert normalize_phone(spoken) == number
+
+
+def test_a_home_above_a_shop_is_still_a_home_and_a_whole_building_is_not():
+    assert property_kind("apartment above a store") == "residential"
+    assert property_kind("the boiler for the whole apartment building") == "commercial"

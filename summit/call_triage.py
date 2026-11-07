@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from summit import config
 from summit.hazard_words import cannot_leave, hazard_in, leaving
 from summit.models import ActionRefused, Priority
-from summit.service_area import area_name, check_zip, place_in
+from summit.service_area import area_name, check_zip, place_in, property_kind
 from summit.triage import EMERGENCY, Assessment, Facts, assess, cannot_leave_script, safety_script
 
 # A P0 that only the word list raised can be a false alarm ("I asked if it smells like
@@ -52,6 +52,9 @@ def caller_turn_to_screen(items: Iterable[object]) -> tuple[str | None, str]:
 
 class TriageMixin:
     def assess_situation(self, facts: Facts) -> str:
+        if self.area_from_file and facts.description and property_kind(facts.description) == "commercial":
+            # "The AC at my restaurant": not the home on the account, so check the address again.
+            self.area, self.property, self.area_from_file = None, "unknown", False
         self.facts = self.facts.updated_with(facts)
         fresh = assess(self.facts, self.cfg, heard=self.heard, today=self.now().date())
         previous = self.assessment
@@ -114,9 +117,11 @@ class TriageMixin:
         if self.p0_script is None:
             # Where they say they are beats where caller ID says they live: the call may be
             # from a rental, a parent's house or a cell phone.
+            checked = self.area.county if self.area and not self.area_from_file else None
             county = (
-                (self.area and self.area.county)
+                checked
                 or self.hazard_place.get("county")
+                or (self.area and self.area.county)
                 or (self.caller_match and self.caller_match.county)
             )
             self.p0_script = safety_script(self.assessment.hazard or "", county or None, self.cfg)
