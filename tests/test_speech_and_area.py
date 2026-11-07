@@ -117,3 +117,17 @@ def test_home_office_is_not_commercial():
 )
 def test_building_owners_are_commercial_but_residents_are_not(description, kind):
     assert property_kind(description) == kind
+
+
+@pytest.mark.parametrize(
+    "spoken, number",
+    [
+        ("five one six, five fifty-five, oh one four two", "+15165550142"),
+        ("six three one, five fifty-five, oh one fifty-five", "+16315550155"),
+        # A correction replaces the end of the number.
+        ("516 555 0142 no wait 0124", "+15165550124"),
+        ("five one six five five five zero one four two... I mean zero one two four", "+15165550124"),
+    ],
+)
+def test_phone_numbers_in_tens_and_with_corrections(spoken, number):
+    assert normalize_phone(spoken) == number

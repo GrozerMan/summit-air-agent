@@ -716,7 +716,9 @@ class CallSession:
             )
         if not phone_read_back_confirmed or (phone_e164 and not self._read_back_phone(phone_e164)):
             problems.append("read the phone number back digit by digit and get a yes")
-        if not address_read_back_confirmed or not self._read_back_address(address):
+        if address and address.strip() and not re.search(r"\d", address):
+            problems.append("the street address needs a house number")
+        elif not address_read_back_confirmed or not self._read_back_address(address):
             problems.append("read the full address back and get a yes")
         if problems:
             raise ActionRefused("Not booked yet: " + "; ".join(problems) + ".")
@@ -768,7 +770,7 @@ class CallSession:
         street = next((w for w in words[1:] if not w.isdigit() and len(w) > 1), None) if number else words[0]
         if number and not re.search(rf"\b{number}\b", said):
             return False
-        return street is None or re.search(rf"\b{re.escape(street)}", said) is not None
+        return street is None or re.search(rf"\b{re.escape(street)}\b", said) is not None
 
     def _stale_reason(self, option: Option) -> str | None:
         """Re-check an offered option against the call as it is now, not as it was when offered."""

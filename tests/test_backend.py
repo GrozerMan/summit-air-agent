@@ -622,3 +622,25 @@ def test_p2_options_stay_within_72_hours(make_call):
     call.find_appointment_options()
     for option in call.offered.values():
         assert (option.day - TUESDAY_10AM.date()).days <= 3
+
+
+def test_an_address_without_a_house_number_is_refused(make_call):
+    # "Shore Road" with no number, and "Shore" only ever said as part of "Bay Shore".
+    call = make_call(None)
+    option = ready_to_book(call)
+    read_back(call, "631-555-0123", "Bay Shore")
+    with pytest.raises(ActionRefused, match="house number"):
+        call.book_appointment(option, **{**GOOD_BOOKING, "address": "Shore Road, Bay Shore"})
+
+
+def test_a_slot_taken_at_the_last_second_leaves_no_orphan_customer(make_call, seeded):
+    call = make_call(None)
+    option = ready_to_book(call)
+    taken = call.offered[option]
+    for _ in range(5):  # fill the window from "other calls"
+        call.scheduler.book(taken, customer_id=1, call_id="other", job_type="x", priority=Priority.P3,
+                            service_address="x", contact_name="x", contact_phone="+15165550142")  # fmt: skip
+    before = seeded.conn.execute("SELECT count(*) FROM customers").fetchone()[0]
+    with pytest.raises(ActionRefused, match="just taken"):
+        call.book_appointment(option, **GOOD_BOOKING)
+    assert seeded.conn.execute("SELECT count(*) FROM customers").fetchone()[0] == before
