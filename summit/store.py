@@ -252,6 +252,13 @@ class Store:
     def set_appointment_status(self, appointment_id: int, status: str) -> None:
         self.conn.execute("UPDATE appointments SET status = ? WHERE id = ?", (status, appointment_id))
 
+    def cancel_appointment(self, appointment_id: int) -> bool:
+        """Booked -> cancelled, only if it's still booked."""
+        cur = self.conn.execute(
+            "UPDATE appointments SET status = 'cancelled' WHERE id = ? AND status = 'booked'", (appointment_id,)
+        )
+        return cur.rowcount == 1
+
     def mark_moved(self, appointment_id: int) -> bool:
         """Booked -> moved, only if it's still booked. False if another call got there first."""
         cur = self.conn.execute(
@@ -324,6 +331,22 @@ class Store:
         call["record"] = json.loads(call["record"])
         call["transcript"] = json.loads(call["transcript"])
         return call
+
+    def open_calls_started_before(self, cutoff: datetime) -> list[dict[str, Any]]:
+        """Calls with no end time that started before `cutoff`: their worker died mid-call."""
+        # Compared as datetimes, not strings: an ISO string's UTC offset changes with DST.
+        rows = self.conn.execute("SELECT * FROM calls WHERE ended_at IS NULL").fetchall()
+        return [
+            {**dict(r), "record": json.loads(r["record"])}
+            for r in rows
+            if datetime.fromisoformat(r["started_at"]) < cutoff
+        ]
+
+    def close_call(self, call_id: str, outcome: str, ended_at: datetime) -> None:
+        self.conn.execute(
+            "UPDATE calls SET outcome = ?, ended_at = ? WHERE id = ? AND ended_at IS NULL",
+            (outcome, ended_at.isoformat(), call_id),
+        )
 
     def add_alert(self, call_id: str | None, severity: str, summary: str) -> int:
         cur = self.conn.execute(

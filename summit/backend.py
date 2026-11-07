@@ -80,6 +80,9 @@ _AFTER_HOURS_WORDS = (
 _VISIT_WORDS = ("diagnos", "service call", "visit", "come out", "trip", "look at", "send someone")
 
 
+_NYC_COUNTIES = {"Kings", "Queens", "Bronx", "New York", "Richmond"}
+
+
 def _any_word(text: str, words: Iterable[str]) -> bool:
     return any(re.search(rf"\b{re.escape(w)}\b", text) for w in words)
 
@@ -115,6 +118,7 @@ class CallSession:
         self.denied: Customer | None = None
         self.caller_id_denied = False
         self.lookup_attempts = 0
+        self.membership_asked = False
         self.facts = Facts()
         self.assessment: Assessment | None = None
         self.heard: set[str] = set()  # hazards found in the caller's own words
@@ -123,6 +127,9 @@ class CallSession:
         self.caller_leaving = False
         self.area: AreaCheck | None = None
         self.property = "unknown"
+        # The heat or cooling comes from the building's own plant (an NYC rental with a
+        # boiler in the basement): the landlord's job, not a visit we can book.
+        self.building_system = False
         self.offered: dict[str, Option] = {}
         # What each offered option was for: None for a new visit, or the appointment being moved.
         self.offered_for: dict[str, int | None] = {}
@@ -148,7 +155,12 @@ class CallSession:
 
     @property
     def is_member(self) -> bool:
-        return self.customer is not None and self.customer.membership == Membership.ACTIVE
+        return self.membership == Membership.ACTIVE
+
+    @property
+    def membership(self) -> Membership | None:
+        """The verified caller's membership today, or None if nobody is verified."""
+        return self.customer.membership_on(self.now().date()) if self.customer else None
 
     @property
     def callback_phone(self) -> str | None:
@@ -276,9 +288,9 @@ class CallSession:
         c = self.customer
         assert c is not None
         lines = [f"{c.full_name}, {c.address}, ZIP {c.zip} ({area_name(c.county, self.cfg)})."]
-        if c.membership == Membership.ACTIVE:
+        if self.membership == Membership.ACTIVE:
             lines.append(f"Active {self.cfg['membership']['name']} member: thank them for being a member.")
-        elif c.membership == Membership.LAPSED:
+        elif self.membership == Membership.LAPSED:
             lines.append(
                 "Their membership has lapsed. After their problem is handled, you can mention "
                 "renewing once; don't push."
@@ -506,10 +518,13 @@ class CallSession:
         zip_code: str | None = None,
         town: str | None = None,
         property_type: str | None = None,
+        heat_from_building: bool | None = None,
     ) -> str:
-        before = (self.area and (self.area.county, self.area.zip), self.property)
+        before = (self.area and (self.area.county, self.area.zip), self.property, self.building_system)
+        if heat_from_building is not None:
+            self.building_system = heat_from_building
         message = self._check_service_address(zip_code, town, property_type)
-        after = (self.area and (self.area.county, self.area.zip), self.property)
+        after = (self.area and (self.area.county, self.area.zip), self.property, self.building_system)
         if after != before:
             # Times offered for the old address or property don't apply to the new one.
             message += self._void_offers()
@@ -526,7 +541,6 @@ class CallSession:
                 "That's a commercial property. We only service homes, so don't book. Offer to have "
                 "the office call them back about it (request_callback, reason starting 'commercial lead')."
             )
-
         if zip_code:
             check = check_zip(zip_code, self.cfg)
             if check.zip is None and town:
@@ -542,6 +556,17 @@ class CallSession:
         elif check.outside:
             self.area = None
             self._set_outcome_unless_decided("out_of_area")
+
+        if self.building_system and (check.in_area or self.area):
+            self._set_outcome_unless_decided("building_system")
+            nyc = self.area and self.area.county in _NYC_COUNTIES
+            report = " In New York City they can also call 311 to report no heat." if nyc else ""
+            return (
+                "Their heat or cooling comes from the building's own system, which is the landlord's or "
+                "building's responsibility, so don't book. Tell them kindly to contact their landlord or "
+                f"building super.{report} If they own their unit's equipment after all, or want the office to "
+                "call them, offer a callback (request_callback)."
+            )
 
         message = check.message
         if check.in_area and self.property == "unknown":
@@ -561,7 +586,7 @@ class CallSession:
 
     def _set_outcome_unless_decided(self, outcome: str) -> None:
         # A booking or a safety emergency outranks "turned away"; the latest turn-away wins otherwise.
-        if self.outcome in (None, "out_of_area", "commercial_lead"):
+        if self.outcome in (None, "out_of_area", "commercial_lead", "building_system"):
             self.outcome = outcome
 
     # Scheduling
@@ -600,7 +625,8 @@ class CallSession:
         self.offered.update({o.option_id: o for o in options})
         self.offered_for.update({o.option_id: reschedule_appointment_id for o in options})
         today = self.now().date()
-        lines = []
+        lines = [self._before_offering()] if reschedule_appointment_id is None else []
+        lines = [line for line in lines if line]
         for option in options:
             surcharge = (
                 f" (after-hours visit, +${self.cfg['pricing']['after_hours_surcharge']})"
@@ -608,10 +634,42 @@ class CallSession:
                 else ""
             )
             lines.append(f"- {option.option_id}: {option.speakable(today)}{surcharge}")
+        notes = [line for line in lines if not line.startswith("- ")]
+        windows = [line for line in lines if line.startswith("- ")]
         return (
-            "Offer these arrival windows, earliest first. The technician arrives within the window.\n"
-            + "\n".join(lines)
+            "".join(f"{n}\n" for n in notes)
+            + "Offer these arrival windows, earliest first. The technician arrives within the window.\n"
+            + "\n".join(windows)
             + "\nBook with the option_id the caller picks."
+            + self._tech_details_reminder()
+        )
+
+    def _before_offering(self) -> str:
+        """Once per call: find out whether an unknown caller is already a member, so a member
+        calling from a new number isn't charged the diagnostic fee or kept out of member times."""
+        if self.customer or self.membership_asked:
+            return ""
+        self.membership_asked = True
+        if self.caller_match:
+            return (
+                f"FIRST: the greeting asked if this is {self.caller_match.first_name}. Report their answer with "
+                "lookup_customer(confirmed_name=...) before offering times."
+            )
+        if self.lookup_attempts:
+            return ""
+        club = self.cfg["membership"]["name"]
+        return (
+            f"FIRST, before offering times: ask once whether they're already a {club} member or have had "
+            "us out before. If yes, verify them (lookup_customer) and call find_appointment_options again: "
+            "members get priority windows and no diagnostic fee. If not, offer these."
+        )
+
+    def _tech_details_reminder(self) -> str:
+        return (
+            "\nBefore booking, if they haven't said: what kind of system it is (furnace, boiler, heat pump, "
+            "central AC, mini-split; gas, oil or electric), and anything the technician needs to get in "
+            "(apartment number, gate or door code, pets, parking). Ask naturally, one at a time; pass them "
+            "as equipment and access_notes."
         )
 
     def _check_ready_to_schedule(self) -> None:
@@ -619,6 +677,11 @@ class CallSession:
             raise ActionRefused("Find out what's wrong and call assess_situation before looking for times.")
         if self.property == "commercial":
             raise ActionRefused("Commercial property: no booking. Offer a callback from the office instead.")
+        if self.building_system:
+            raise ActionRefused(
+                "The building supplies their heat or cooling: that's the landlord's to fix. No booking; "
+                "suggest the landlord or super, or offer a callback."
+            )
         if self.area is None:
             raise ActionRefused("Check the service address first (check_service_address).")
         if self.property == "unknown":
@@ -675,6 +738,8 @@ class CallSession:
         notes: str,
         phone_read_back_confirmed: bool,
         address_read_back_confirmed: bool,
+        equipment: str | None = None,
+        access_notes: str | None = None,
     ) -> str:
         option = self.offered.get(option_id)
         phone_e164 = normalize_phone(phone)
@@ -736,7 +801,7 @@ class CallSession:
             service_address=f"{address.strip()}, {zip5}",
             contact_name=f"{first_name.strip()} {last_name.strip()}",
             contact_phone=phone_e164,
-            notes=self._technician_notes(notes),
+            notes=self._technician_notes(notes, equipment=equipment, access_notes=access_notes),
         )
         if appointment_id is None:
             if created:
@@ -776,6 +841,8 @@ class CallSession:
         """Re-check an offered option against the call as it is now, not as it was when offered."""
         if self.property != "residential":
             return "the property isn't confirmed as a home"
+        if self.building_system:
+            return "the building supplies their heat or cooling"
         if self.area is None or self.area.county != option.county:
             where = area_name(self.area.county, self.cfg) if self.area and self.area.county else "no checked address"
             return f"that window is for {area_name(option.county, self.cfg)} and the address is now {where}"
@@ -840,6 +907,27 @@ class CallSession:
         return (
             f"Moved: appointment #{new_id}. This confirmation is being read to the caller word for word, "
             f'so don\'t repeat it: "{self.announcement}"'
+        )
+
+    def cancel_appointment(self, appointment_id: int) -> str:
+        self._refuse_if_emergency()
+        appointment = self._own_appointment(appointment_id)
+        if not self.store.cancel_appointment(appointment_id):
+            raise ActionRefused(
+                f"Appointment #{appointment_id} was changed by another call a moment ago, so nothing was "
+                "cancelled. Call lookup_customer to see their appointments as they are now."
+            )
+        self.note(f"cancelled appointment #{appointment_id}")
+        if self.outcome in (None, "info_only"):
+            self.outcome = "cancelled"
+        today = self.now().date()
+        self.announcement = (
+            f"Done. Your {appointment.job_type} {say_day(appointment.day, today)}, {say_window(appointment.window)}, "
+            "is cancelled. Is there anything else I can help with?"
+        )
+        return (
+            f"Cancelled: appointment #{appointment_id}. This confirmation is being read to the caller word for "
+            f'word, so don\'t repeat it: "{self.announcement}"'
         )
 
     def _move(self, appointment: Appointment, option: Option) -> int | None:
@@ -1011,7 +1099,7 @@ class CallSession:
         return text
 
     def _membership_nudge(self) -> str:
-        if self.is_member or (self.customer and self.customer.membership == Membership.LAPSED):
+        if self.membership in (Membership.ACTIVE, Membership.LAPSED):
             return ""
         benefits = ", ".join(self.cfg["membership"]["benefits"])
         return (
@@ -1104,7 +1192,7 @@ class CallSession:
         if self.facts.vulnerable_occupant:
             parts.append("Vulnerable occupant at home.")
         if self.customer:
-            status = "member" if self.is_member else self.customer.membership.value
+            status = "member" if self.is_member else (self.membership or Membership.NONE).value
             parts.append(f"Customer: {self.customer.full_name} ({status}, verified).")
         elif self.caller_id:
             parts.append(f"Caller {say_phone(self.caller_id)} (not verified).")
@@ -1112,9 +1200,16 @@ class CallSession:
             parts.append("Notes: " + "; ".join(self.notes) + ".")
         return " ".join(parts)
 
-    def _technician_notes(self, caller_notes: str) -> str:
-        summary = self.technician_summary()
-        return f"{summary} {caller_notes.strip()}".strip()
+    def _technician_notes(
+        self, caller_notes: str, equipment: str | None = None, access_notes: str | None = None
+    ) -> str:
+        parts = [self.technician_summary()]
+        if equipment and equipment.strip():
+            parts.append(f"Equipment: {equipment.strip()}.")
+        if access_notes and access_notes.strip():
+            parts.append(f"Access: {access_notes.strip()}.")
+        parts.append(caller_notes.strip())
+        return " ".join(p for p in parts if p)
 
     def record(self) -> dict[str, Any]:
         return {
@@ -1145,3 +1240,33 @@ class CallSession:
         phone = say_phone(self.callback_phone) if self.callback_phone else "no number"
         place = f", {area_name(self.area.county, self.cfg)}" if self.area and self.area.county else ""
         return f"{name} ({phone}{place})"
+
+
+def close_abandoned_calls(store: Store, cfg: dict[str, Any], now: datetime, older_than_minutes: int = 30) -> int:
+    """Close calls whose worker died before hang-up (a crash, a deploy, a killed process).
+
+    Their hang-up handler never ran, so nothing followed them up: a triaged caller who
+    wasn't booked gets the callback finalize() would have made. Runs as each new call starts.
+    """
+    closed = 0
+    notifier = Notifier(store)
+    for row in store.open_calls_started_before(now - timedelta(minutes=older_than_minutes)):
+        record = row["record"]
+        priority = record.get("priority")
+        outcome = record.get("outcome") or row.get("outcome")
+        phone = row.get("caller_id")
+        triaged_unbooked = priority in (1, 2) and not record.get("appointments") and not record.get("callbacks")
+        if triaged_unbooked and phone:
+            urgent = priority == 1
+            due = (
+                now + timedelta(minutes=cfg["escalation"]["urgent_callback_minutes"])
+                if urgent
+                else config.next_office_opening(cfg, now + timedelta(hours=cfg["escalation"]["callback_hours"]))
+            )
+            store.add_callback(row["id"], phone, "Call dropped before booking (agent restarted)", due, urgent=urgent)
+            notifier.alert(row["id"], "urgent", f"Call from {say_phone(phone)} dropped mid-call at P{priority}; callback set")
+            outcome = "callback"
+        store.close_call(row["id"], outcome or "abandoned", now)
+        closed += 1
+    return closed
+

@@ -644,3 +644,83 @@ def test_a_slot_taken_at_the_last_second_leaves_no_orphan_customer(make_call, se
     with pytest.raises(ActionRefused, match="just taken"):
         call.book_appointment(option, **GOOD_BOOKING)
     assert seeded.conn.execute("SELECT count(*) FROM customers").fetchone()[0] == before
+
+
+def test_an_expired_active_membership_counts_as_lapsed(make_call, seeded):
+    from datetime import date
+
+    from summit.models import Membership
+
+    seeded.set_membership(1, Membership.ACTIVE, date(2026, 10, 1))  # expired before Tue 3 Nov
+    call = make_call("+15165550142")
+    summary = call.lookup_customer(confirmed_name=True)
+    assert not call.is_member and "lapsed" in summary
+
+
+# Membership for unknown callers, technician details, NYC building heat, cancellations
+
+
+def test_an_unknown_caller_is_asked_about_membership_once(make_call):
+    call = make_call(None)
+    call.assess_situation(Facts(no_cooling=True, indoor_temp_f=80, vulnerable_occupant=False))
+    call.check_service_address(zip_code="11743", property_type="house")
+    first = call.find_appointment_options()
+    assert "already a Summit Comfort Club member" in first
+    assert "member" not in call.find_appointment_options().split("Offer these")[0]
+
+
+def test_the_options_remind_the_agent_what_the_technician_needs(make_call):
+    call = make_call(None)
+    call.assess_situation(Facts(request_type="tune_up"))
+    call.check_service_address(zip_code="11743", property_type="house")
+    assert "what kind of system" in call.find_appointment_options()
+
+
+def test_equipment_and_access_reach_the_technician(make_call, seeded):
+    call = make_call(None)
+    option = ready_to_book(call)
+    call.book_appointment(option, **GOOD_BOOKING, equipment="gas furnace, about 12 years old",
+                          access_notes="side door, dog in the yard")  # fmt: skip
+    notes = seeded.appointments_for_call("call-1")[0]["notes"]
+    assert "Equipment: gas furnace" in notes and "Access: side door" in notes
+
+
+def test_heat_from_the_building_is_the_landlords_job(make_call):
+    call = make_call(None)
+    call.assess_situation(Facts(no_heat=True))
+    result = call.check_service_address(zip_code="11215", property_type="apartment", heat_from_building=True)
+    assert "landlord" in result and "311" in result
+    assert call.outcome == "building_system"
+    with pytest.raises(ActionRefused, match="landlord"):
+        call.find_appointment_options()
+
+
+def test_a_verified_customer_can_cancel_their_own_appointment(member_call, seeded):
+    member_call.lookup_customer(confirmed_name=True)
+    result = member_call.cancel_appointment(1)
+    assert result.startswith("Cancelled") and "is cancelled" in member_call.take_announcement()
+    assert seeded.get_appointment(1).status == "cancelled"
+    assert member_call.outcome == "cancelled"
+
+
+def test_an_unverified_caller_cannot_cancel(make_call):
+    with pytest.raises(ActionRefused, match="Verify"):
+        make_call(None).cancel_appointment(1)
+
+
+def test_a_call_whose_worker_died_is_closed_and_followed_up(make_call, seeded, cfg):
+    from datetime import timedelta
+
+    from conftest import TUESDAY_10AM
+
+    from summit.backend import close_abandoned_calls
+
+    call = make_call("+16315550144", call_id="died")
+    call.assess_situation(Facts(no_heat=True, indoor_temp_f=55))  # P1, never booked, no hang-up
+    call.save()
+    assert close_abandoned_calls(seeded, cfg, TUESDAY_10AM + timedelta(minutes=45)) == 1
+    row = seeded.get_call("died")
+    assert row["ended_at"] and row["outcome"] == "callback"
+    callbacks = seeded.callbacks_for_call("died")
+    assert len(callbacks) == 1 and callbacks[0]["urgent"]
+    assert close_abandoned_calls(seeded, cfg, TUESDAY_10AM + timedelta(minutes=50)) == 0

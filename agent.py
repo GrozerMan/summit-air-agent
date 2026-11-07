@@ -13,6 +13,7 @@ import logging
 import os
 import uuid
 from collections.abc import AsyncIterable, Awaitable, Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +38,7 @@ from livekit.agents.beta import EndCallTool
 from livekit.plugins import krisp
 
 from summit import config
-from summit.backend import ActionRefused, CallSession, caller_turn_to_screen
+from summit.backend import ActionRefused, CallSession, caller_turn_to_screen, close_abandoned_calls
 from summit.notify import Notifier
 from summit.store import Store
 from summit.triage import Facts
@@ -215,15 +216,20 @@ class SummitAgent(Agent):
         zip_code: str | None = None,
         town: str | None = None,
         property_type: str | None = None,
+        heat_from_building: bool | None = None,
     ) -> str:
         """Check the address where the work is: that we serve it and that it's a home.
 
         Args:
             zip_code: ZIP code of the service address.
-            town: Town of the service address, if they don't know the ZIP or the tool asks for it.
+            town: Town, neighborhood or borough, if they don't know the ZIP or the tool asks for it.
             property_type: What the property is, in their words: house, condo, two-family, restaurant...
+            heat_from_building: For an apartment, condo or co-op: True if the heat or cooling comes from
+                the building's own system (a boiler for the whole building), False if it's their own unit.
         """
-        args = dict(zip_code=zip_code, town=town, property_type=property_type)
+        args = dict(
+            zip_code=zip_code, town=town, property_type=property_type, heat_from_building=heat_from_building
+        )
         return self._run("check_service_address", args, lambda: self.call.check_service_address(**args))
 
     @function_tool
@@ -253,6 +259,8 @@ class SummitAgent(Agent):
         notes: str,
         phone_read_back_confirmed: bool,
         address_read_back_confirmed: bool,
+        equipment: str | None = None,
+        access_notes: str | None = None,
     ) -> str:
         """Book the window the caller chose. Before calling, read the phone number back digit
         by digit and the full address back, and hear them confirm both.
@@ -270,12 +278,16 @@ class SummitAgent(Agent):
                 The backend checks that you actually said it.
             address_read_back_confirmed: You read the address back out loud and they said it's right.
                 The backend checks that you actually said it.
+            equipment: The system, if they know: furnace, boiler, heat pump, central AC, mini-split; gas,
+                oil or electric; roughly how old.
+            access_notes: How the technician gets in: apartment number, gate or door code, pets, parking.
         """
         args = dict(
             option_id=option_id, first_name=first_name, last_name=last_name, phone=phone,
             address=address, zip_code=zip_code, job_type=job_type, notes=notes,
             phone_read_back_confirmed=phone_read_back_confirmed,
             address_read_back_confirmed=address_read_back_confirmed,
+            equipment=equipment, access_notes=access_notes,
         )  # fmt: skip
         return self._run("book_appointment", args, lambda: self.call.book_appointment(**args))
 
@@ -289,6 +301,16 @@ class SummitAgent(Agent):
         """
         args = dict(appointment_id=appointment_id, option_id=option_id)
         return self._run("change_appointment", args, lambda: self.call.change_appointment(**args))
+
+    @function_tool
+    async def cancel_appointment(self, context: RunContext, appointment_id: int) -> str:
+        """Cancel one of a verified caller's upcoming appointments, once they've said they want it cancelled.
+
+        Args:
+            appointment_id: The appointment to cancel.
+        """
+        args = dict(appointment_id=appointment_id)
+        return self._run("cancel_appointment", args, lambda: self.call.cancel_appointment(**args))
 
     @function_tool
     async def request_callback(
@@ -396,6 +418,10 @@ server = AgentServer()
 async def entrypoint(ctx: JobContext) -> None:
     cfg = config.load()
     store = Store()
+    try:
+        close_abandoned_calls(store, cfg, datetime.now(config.timezone(cfg)))
+    except Exception:
+        logger.exception("couldn't close abandoned calls")  # never worth failing a live call over
     call_id = uuid.uuid4().hex[:12]
     ctx.log_context_fields = {"room": ctx.room.name, "call_id": call_id}
 
