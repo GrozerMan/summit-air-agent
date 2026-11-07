@@ -49,7 +49,7 @@ logger = logging.getLogger("summit-air")
 
 # Must match the agent name in the LiveKit dispatch rule for the phone number.
 AGENT_NAME = "summit-air"
-PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text()
+PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text().strip()
 
 CHECK_INS = ["Are you still there?", "Sorry, I can't hear you. If you're still there, just say something."]
 SILENT_GOODBYE = "I'll let you go for now. If you still need us, call back any time. Goodbye."
@@ -67,11 +67,24 @@ def build_llm() -> llm.LLM:
 
 def instructions_for(call: CallSession) -> str:
     now = call.now()
-    office = "open" if config.office_open(call.cfg, now) else "closed"
     time_of_day = now.strftime("%I:%M %p").lstrip("0")
-    return (
-        f"{PROMPT}\n\n## Right now\nIt's {now:%A}, {now:%B} {now.day}, {time_of_day}. The office is {office}."
+    if config.office_open(call.cfg, now):
+        office = "The office is open."
+    else:
+        # Stress finding H12: told only "the office is closed", the model invented "we don't do
+        # night service" before triage, and a caller with a real P1 might hang up.
+        office = (
+            "The office is closed, but urgent problems are still handled: find out what's wrong first "
+            "and let the tools say when someone can come."
+        )
+    number, _ = call.plan_transfer()
+    # H7: the model said "I'll connect you" before the transfer tool answered.
+    transfer = (
+        "A live transfer to the office is possible right now (transfer_to_human)."
+        if number
+        else "There's no live transfer to a person right now: if they want one, offer a callback from the office."
     )
+    return f"{PROMPT}\n\n## Right now\nIt's {now:%A}, {now:%B} {now.day}, {time_of_day}. {office} {transfer}"
 
 
 class SummitAgent(Agent):
