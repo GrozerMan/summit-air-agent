@@ -7,11 +7,13 @@ requires-python = ">=3.11"
 dependencies = [
     "livekit-agents~=1.8.9",
     "livekit-plugins-krisp>=0.4.9,<0.5",  # versioned separately from livekit-agents
+    "psycopg[binary]>=3.2,<4",
     "python-dotenv>=1.0",
 ]
 
 [dependency-groups]
 dev = [
+    "pgserver>=0.1.4",
     "pytest>=8",
     "pytest-asyncio>=0.24",
 ]

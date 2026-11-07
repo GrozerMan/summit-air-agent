@@ -145,6 +145,8 @@ class CallSession:
         # Everything the agent has said so far, updated before each model turn. Read-backs
         # are checked against it rather than taken on the model's word.
         self.agent_said = ""
+        # Response times and usage, filled in at hang-up (summit/call_metrics.py).
+        self.metrics: dict[str, Any] = {}
 
     def now(self) -> datetime:
         return self._clock().astimezone(self.tz)
@@ -1226,6 +1228,7 @@ class CallSession:
             "notes": self.notes,
             "false_claims": self.false_claims,
             "outcome": self.outcome,
+            "metrics": self.metrics,
             "tools": self.tool_log,
         }
 

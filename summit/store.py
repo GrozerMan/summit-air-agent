@@ -1,10 +1,15 @@
-"""SQLite system of record.
+"""System of record: SQLite locally and in tests, Postgres when deployed.
+
+`Store()` uses Postgres when DATABASE_URL is set (the LiveKit Cloud deploy, where
+the container's disk doesn't outlive a restart), SQLite at data/summit.db otherwise.
+The SQL is written once, in SQLite's dialect, and translated for Postgres.
 
 In production this would be ServiceTitan or Housecall Pro behind the same
 methods; nothing above this module should need to know the difference.
 """
 
 import json
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -92,8 +97,58 @@ CREATE TABLE IF NOT EXISTS callbacks (
 """
 
 
+_BOOKING_LOCK = 4242
+
+
+class _PgRow(dict):
+    """A row that, like sqlite3.Row, answers to row["name"] and row[0]."""
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+
+
+def _pg_rows(cursor: Any) -> Any:
+    names = [c.name for c in cursor.description or []]
+    return lambda values: _PgRow(zip(names, values))
+
+
+class _PgConnection:
+    """The part of sqlite3's connection API this module and the dashboard use, over psycopg.
+    SQL comes in SQLite's dialect ("?" placeholders) and is translated here."""
+
+    def __init__(self, url: str) -> None:
+        import psycopg  # only needed when deployed
+
+        self._conn = psycopg.connect(url, autocommit=True, row_factory=_pg_rows)
+
+    def execute(self, sql: str, params: tuple | list = ()) -> Any:
+        return self._conn.execute(sql.replace("%", "%%").replace("?", "%s"), params)
+
+    def executescript(self, script: str) -> None:
+        self._conn.execute(script)  # several statements, no parameters
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+def _pg_schema() -> str:
+    return SCHEMA.replace("INTEGER PRIMARY KEY", "BIGSERIAL PRIMARY KEY").replace(
+        "(datetime('now'))", "(now()::text)"
+    )
+
+
 class Store:
     def __init__(self, path: Path | str | None = None) -> None:
+        url = str(path) if path else os.getenv("DATABASE_URL", "")
+        self.is_postgres = url.startswith(("postgres://", "postgresql://"))
+        if self.is_postgres:
+            self.path = url
+            self.conn: Any = _PgConnection(url)
+            self.conn.executescript(_pg_schema())
+            self.conn.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS confirmed INTEGER NOT NULL DEFAULT 1")
+            return
         self.path = str(path or config.db_path())
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +160,12 @@ class Store:
             self.conn.execute("PRAGMA journal_mode = WAL")
         self._migrate()
         self.conn.executescript(SCHEMA)
+
+    def _insert(self, sql: str, params: tuple) -> int:
+        """Run an INSERT and return the new row's id, in either database."""
+        if self.is_postgres:
+            return self.conn.execute(sql + " RETURNING id", params).fetchone()[0]
+        return self.conn.execute(sql, params).lastrowid
 
     def _migrate(self) -> None:
         columns = [r[1] for r in self.conn.execute("PRAGMA table_info(customers)")]
@@ -130,11 +191,21 @@ class Store:
     def close(self) -> None:
         self.conn.close()
 
+    def drop_all(self) -> None:
+        """Delete every table, for `seed --reset` on Postgres. Irreversible."""
+        for table in ("callbacks", "alerts", "calls", "appointments", "memberships", "customers"):
+            self.conn.execute(f"DROP TABLE IF EXISTS {table}")
+
     @contextmanager
-    def write_lock(self) -> Iterator[sqlite3.Connection]:
-        """BEGIN IMMEDIATE takes the write lock up front, so a seat check and the
-        insert that depends on it can't interleave with another call's booking."""
-        self.conn.execute("BEGIN IMMEDIATE")
+    def write_lock(self) -> Iterator[Any]:
+        """Take the write lock up front, so a seat check and the insert that depends on it
+        can't interleave with another call's booking. SQLite: BEGIN IMMEDIATE. Postgres: one
+        transaction-scoped advisory lock that every booking and move queues on."""
+        if self.is_postgres:
+            self.conn.execute("BEGIN")
+            self.conn.execute("SELECT pg_advisory_xact_lock(?)", (_BOOKING_LOCK,))
+        else:
+            self.conn.execute("BEGIN IMMEDIATE")
         try:
             yield self.conn
         except BaseException:
@@ -154,12 +225,11 @@ class Store:
         county: str,
         confirmed: bool = True,
     ) -> int:
-        cur = self.conn.execute(
+        return self._insert(
             "INSERT INTO customers (first_name, last_name, phone, address, zip, county, confirmed) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (first_name, last_name, phone, address, zip_code, county, int(confirmed)),
         )
-        return cur.lastrowid
 
     def delete_customer_without_history(self, customer_id: int) -> None:
         """Remove a customer created for a booking that then failed. Never one with any
@@ -238,7 +308,7 @@ class Store:
         contact_phone: str,
         notes: str = "",
     ) -> int:
-        cur = self.conn.execute(
+        return self._insert(
             "INSERT INTO appointments (customer_id, call_id, county, day, arrival_window, pool, "
             "job_type, priority, service_address, contact_name, contact_phone, notes) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -247,7 +317,6 @@ class Store:
                 int(priority), service_address, contact_name, contact_phone, notes,
             ),
         )  # fmt: skip
-        return cur.lastrowid
 
     def set_appointment_status(self, appointment_id: int, status: str) -> None:
         self.conn.execute("UPDATE appointments SET status = ? WHERE id = ?", (status, appointment_id))
@@ -349,11 +418,10 @@ class Store:
         )
 
     def add_alert(self, call_id: str | None, severity: str, summary: str) -> int:
-        cur = self.conn.execute(
+        return self._insert(
             "INSERT INTO alerts (call_id, severity, summary) VALUES (?, ?, ?)",
             (call_id, severity, summary),
         )
-        return cur.lastrowid
 
     def acknowledge_alert(self, alert_id: int) -> None:
         self.conn.execute("UPDATE alerts SET acknowledged = 1 WHERE id = ?", (alert_id,))
@@ -371,11 +439,10 @@ class Store:
         urgent: bool = False,
         name: str | None = None,
     ) -> int:
-        cur = self.conn.execute(
+        return self._insert(
             "INSERT INTO callbacks (call_id, phone, name, reason, urgent, due_at) VALUES (?, ?, ?, ?, ?, ?)",
             (call_id, phone, name, reason, int(urgent), due_at.isoformat()),
         )
-        return cur.lastrowid
 
     def callbacks_for_call(self, call_id: str) -> list[dict[str, Any]]:
         rows = self.conn.execute(

@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -19,9 +20,32 @@ def cfg():
     return config.load()
 
 
+# SUMMIT_TEST_POSTGRES=1 runs every test against a throwaway Postgres (pgserver, a dev
+# dependency) instead of in-memory SQLite: the deployed agent's database.
+ON_POSTGRES = os.getenv("SUMMIT_TEST_POSTGRES") == "1"
+
+
+@pytest.fixture(scope="session")
+def pg_uri(tmp_path_factory):
+    """A throwaway Postgres server for the session."""
+    pgserver = pytest.importorskip("pgserver")
+    server = pgserver.get_server(tmp_path_factory.mktemp("pg"), cleanup_mode="stop")
+    yield server.get_uri()
+    server.cleanup()
+
+
+def fresh_postgres(uri: str) -> str:
+    import psycopg
+
+    with psycopg.connect(uri, autocommit=True) as conn:
+        conn.execute("DROP SCHEMA public CASCADE")
+        conn.execute("CREATE SCHEMA public")
+    return uri
+
+
 @pytest.fixture
-def store():
-    s = Store(":memory:")
+def store(request):
+    s = Store(fresh_postgres(request.getfixturevalue("pg_uri"))) if ON_POSTGRES else Store(":memory:")
     yield s
     s.close()
 

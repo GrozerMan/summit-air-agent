@@ -39,6 +39,7 @@ from livekit.plugins import krisp
 
 from summit import config
 from summit.backend import ActionRefused, CallSession, caller_turn_to_screen, close_abandoned_calls
+from summit.call_metrics import CallMetrics
 from summit.notify import Notifier
 from summit.store import Store
 from summit.triage import Facts
@@ -47,8 +48,9 @@ load_dotenv(".env.local")
 
 logger = logging.getLogger("summit-air")
 
-# Must match the agent name in the LiveKit dispatch rule for the phone number.
-AGENT_NAME = "summit-air"
+# Must match the agent name in the LiveKit dispatch rule for the phone number. A laptop
+# worker should set AGENT_NAME=summit-air-dev so it never takes calls meant for the deploy.
+AGENT_NAME = os.getenv("AGENT_NAME", "summit-air")
 PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text().strip()
 
 CHECK_INS = ["Are you still there?", "Sorry, I can't hear you. If you're still there, just say something."]
@@ -470,6 +472,9 @@ async def entrypoint(ctx: JobContext) -> None:
         user_away_timeout=cfg["silence"]["check_in_seconds"],
     )
 
+    call_metrics = CallMetrics()
+    session.on("metrics_collected", lambda event: call_metrics.add(event.metrics))
+
     # The session's close event and the job's shutdown can both fire; finalize once.
     finished = False
 
@@ -477,6 +482,8 @@ async def entrypoint(ctx: JobContext) -> None:
         nonlocal finished
         if not finished:
             finished = True
+            call.metrics = call_metrics.summary()
+            logger.info("call metrics: %s", call.metrics)
             call.finalize(transcript_of(session.history))
 
     def save_transcript(_event: Any) -> None:
