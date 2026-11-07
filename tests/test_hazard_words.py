@@ -240,7 +240,9 @@ def test_leaving(text):
     assert leaving(text)
 
 
-@pytest.mark.parametrize("text", ["I can't leave, my mom is in a wheelchair", "what do I do", "Should I leave?"])
+@pytest.mark.parametrize(
+    "text", ["I can't leave, my mom is in a wheelchair", "what do I do", "Should I leave?"]
+)
 def test_not_leaving(text):
     assert not leaving(text)
 

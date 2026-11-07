@@ -73,7 +73,9 @@ def _next_weekday(day: date) -> date:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Load demo customers (into DATABASE_URL if set, else data/summit.db)")
+    parser = argparse.ArgumentParser(
+        description="Load demo customers (into DATABASE_URL if set, else data/summit.db)"
+    )
     parser.add_argument("--member-phone", default=DEMO_MEMBER_PHONE, help="your cell, e.g. +15165550142")
     parser.add_argument("--member-name", default="Dana Reyes")
     parser.add_argument("--reset", action="store_true", help="delete the existing database first")

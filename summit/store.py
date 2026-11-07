@@ -111,7 +111,7 @@ class _PgRow(dict):
 
 def _pg_rows(cursor: Any) -> Any:
     names = [c.name for c in cursor.description or []]
-    return lambda values: _PgRow(zip(names, values))
+    return lambda values: _PgRow(zip(names, values, strict=True))
 
 
 class _PgConnection:
@@ -147,7 +147,9 @@ class Store:
             self.path = url
             self.conn: Any = _PgConnection(url)
             self.conn.executescript(_pg_schema())
-            self.conn.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS confirmed INTEGER NOT NULL DEFAULT 1")
+            self.conn.execute(
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS confirmed INTEGER NOT NULL DEFAULT 1"
+            )
             return
         self.path = str(path or config.db_path())
         if self.path != ":memory:":
@@ -324,7 +326,8 @@ class Store:
     def cancel_appointment(self, appointment_id: int) -> bool:
         """Booked -> cancelled, only if it's still booked."""
         cur = self.conn.execute(
-            "UPDATE appointments SET status = 'cancelled' WHERE id = ? AND status = 'booked'", (appointment_id,)
+            "UPDATE appointments SET status = 'cancelled' WHERE id = ? AND status = 'booked'",
+            (appointment_id,),
         )
         return cur.rowcount == 1
 

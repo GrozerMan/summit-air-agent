@@ -39,7 +39,12 @@ def test_known_zip_maps_to_county(cfg):
 
 def test_every_zip_in_our_counties_is_listed(cfg):
     # Elmont, Inwood, Bayville and Carle Place were turned away by the old curated list.
-    for zip_code, county in [("11003", "Nassau"), ("11096", "Nassau"), ("11709", "Nassau"), ("11514", "Nassau")]:
+    for zip_code, county in [
+        ("11003", "Nassau"),
+        ("11096", "Nassau"),
+        ("11709", "Nassau"),
+        ("11514", "Nassau"),
+    ]:
         assert check_zip(zip_code, cfg).county == county
 
 

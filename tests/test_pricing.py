@@ -19,7 +19,8 @@ def test_price_answers(make_call, question, expected):
 
 
 @pytest.mark.parametrize(
-    "question", ["how much to replace a capacitor", "how much is a replacement capacitor", "how much to fix my AC"]
+    "question",
+    ["how much to replace a capacitor", "how much is a replacement capacitor", "how much to fix my AC"],
 )
 def test_repairs_and_parts_get_no_figure(make_call, question):
     assert "$" not in make_call(None).get_pricing(question)

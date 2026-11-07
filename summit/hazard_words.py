@@ -124,14 +124,18 @@ _HEAT_CONTEXT = re.compile(
 # Smoke, sparks, flames. HVAC speech is full of fire words that aren't fires: a furnace
 # that "won't fire" or "fires up", a spark igniter, a smoke detector with a low battery.
 _FIRE_PATTERNS = [
-    re.compile(r"\bspark(?:s|ed|ing|y)?\b(?!\s*-?\s*(?:igniters?|ignitors?|ignition|electrodes?|plugs?))", re.I),
+    re.compile(
+        r"\bspark(?:s|ed|ing|y)?\b(?!\s*-?\s*(?:igniters?|ignitors?|ignition|electrodes?|plugs?))", re.I
+    ),
     re.compile(r"\bsmok(?:e|ed|es|ing|y|ey)\b(?!\s+(?:detectors?|alarms?)\b)", re.I),
     re.compile(
         r"\b(?:smoke|fire)\s+(?:detectors?|alarms?)\b(?:\W+\w+){0,3}?\W+"
         r"(?:going\s+off|went\s+off|goes\s+off|blaring|screaming|beep\w*|sounding|won'?t\s+stop)",
         re.I,
     ),
-    re.compile(r"\bflames\b(?!\s+(?:look|looks|are|is)\s+(?:\w+\s+and\s+)?(?:blue|steady|normal|nice|fine)\b)", re.I),
+    re.compile(
+        r"\bflames\b(?!\s+(?:look|looks|are|is)\s+(?:\w+\s+and\s+)?(?:blue|steady|normal|nice|fine)\b)", re.I
+    ),
     re.compile(
         r"\bflame\b(?:\W+\w+){0,3}?\W+(?:coming|shooting|out\s+of|outside|from\s+the\s+(?:vent|register|unit))",
         re.I,
@@ -175,7 +179,9 @@ _EARLIER = re.compile(
     re.I,
 )
 # "I asked my wife if it smells like gas" ... "and she said no".
-_ASKED = re.compile(r"\b(?:asked|asking|ask|checked|checking|check)\b(?:\W+\w+){0,4}?\W+(?:if|whether)\b", re.I)
+_ASKED = re.compile(
+    r"\b(?:asked|asking|ask|checked|checking|check)\b(?:\W+\w+){0,4}?\W+(?:if|whether)\b", re.I
+)
 _ANSWER = re.compile(r"\b(?:said|says|answered|replied|told\s+me)\b\W+(?:that\W+)?(.{0,40})", re.I)
 _ANSWER_NO = re.compile(
     r"^(?:no|nope|nah|not|nothing|just|only|dusty|definitely\s+not|it'?s\s+(?:just|only|not|dusty)|"
@@ -246,14 +252,14 @@ def _negated(text: str, match: re.Match[str]) -> bool:
         if word.lower() not in _DENIAL_FILLER:
             break
     inside = _WORD.findall(match.group(0))
-    for word, following in zip(inside, inside[1:]):
+    for word, following in zip(inside, inside[1:], strict=False):
         if _NEGATION.fullmatch(word) and following.lower() not in _HEDGES:
             return True
     return False
 
 
 def _asked_and_denied(text: str, match: re.Match[str]) -> bool:
-    """"I asked my wife if it smells like gas and she said no." A question about the
+    """ "I asked my wife if it smells like gas and she said no." A question about the
     hazard that got a no. Unanswered, or answered anything but no, it still counts."""
     if not _ASKED.search(_sentence_before(text, match.start())):
         return False
@@ -370,7 +376,7 @@ def _co_symptoms(text: str) -> bool:
 
 
 def hazard_in(text: str | None) -> str | None:
-    """"gas", "co", "fire", or None for whatever the caller said."""
+    """ "gas", "co", "fire", or None for whatever the caller said."""
     if not text:
         return None
     text = text.replace("’", "'")

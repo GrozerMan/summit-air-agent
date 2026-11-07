@@ -94,9 +94,11 @@ def test_two_calls_moving_the_same_appointment_move_it_once(tmp_path, run):
         t.start()
     for t in threads:
         t.join()
-    booked = Store(path).conn.execute(
-        "SELECT count(*) FROM appointments WHERE customer_id = 1 AND status = 'booked'"
-    ).fetchone()[0]
+    booked = (
+        Store(path)
+        .conn.execute("SELECT count(*) FROM appointments WHERE customer_id = 1 AND status = 'booked'")
+        .fetchone()[0]
+    )
     assert booked == 1 and sorted(outcomes) == ["moved", "refused"]
 
 

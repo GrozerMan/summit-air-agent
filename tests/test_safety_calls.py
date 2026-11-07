@@ -56,7 +56,9 @@ def test_sparks_reported_in_the_past_reach_p0_without_the_model(make_call, seede
 
 def test_sparks_in_the_models_description_reach_p0(make_call):
     call = make_call(None)
-    call.assess_situation(Facts(no_cooling=True, description="AC unit was sparking earlier, trips the breaker"))
+    call.assess_situation(
+        Facts(no_cooling=True, description="AC unit was sparking earlier, trips the breaker")
+    )
     assert call.priority == Priority.P0
 
 
@@ -129,10 +131,14 @@ def test_where_the_caller_is_beats_caller_id(make_call):
 
 
 def test_of_two_places_the_one_the_caller_is_at_wins(make_call):
-    script = make_call(None).screen_caller_turn("My mom in Huntington is fine but I'm in Yonkers and I smell gas")
+    script = make_call(None).screen_caller_turn(
+        "My mom in Huntington is fine but I'm in Yonkers and I smell gas"
+    )
     assert "Con Edison" in script
 
 
 def test_nyc_borough_gets_its_utility_and_queens_stays_generic(make_call):
-    assert "National Grid at seven one eight" in make_call(None).screen_caller_turn("I smell gas in Park Slope")
+    assert "National Grid at seven one eight" in make_call(None).screen_caller_turn(
+        "I smell gas in Park Slope"
+    )
     assert "your gas company" in make_call(None).screen_caller_turn("I smell gas, I'm in Astoria")

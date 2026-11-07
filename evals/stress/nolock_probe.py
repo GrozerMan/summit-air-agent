@@ -1,15 +1,18 @@
 """Probe: is BEGIN IMMEDIATE load-bearing? Removes the lock in-process (monkeypatch, repo untouched)
 and races 4 bookings for the last seat 30 times.  uv run python -m evals.stress.nolock_probe"""
-import threading, contextlib
+import contextlib
+import threading
+from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from zoneinfo import ZoneInfo
+
 from summit import config
-from summit.store import Store
+from summit.models import Pool, Priority
 from summit.scheduling import Scheduler
 from summit.seed import seed
-from summit.models import Pool, Priority
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from summit.store import Store
+
 T = datetime(2026,11,3,10,0,tzinfo=ZoneInfo("America/New_York")); CFG=config.load()
 Store.write_lock = lambda self: contextlib.nullcontext(self.conn)   # lock removed
 # widen the check->insert gap the way a slow disk/GIL switch would

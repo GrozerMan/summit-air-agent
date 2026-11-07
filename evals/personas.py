@@ -136,7 +136,7 @@ PERSONAS = [
     Persona(
         "gas_with_town",
         "You're in Yonkers, ZIP 10701. Start the call with exactly: \"I'm in Yonkers, 10701, and I smell "
-        "gas by the boiler.\" Then answer questions briefly.",
+        'gas by the boiler." Then answer questions briefly.',
         expect={"priority": 0, "booked": False, "alert": "critical", "utility": "Con Edison"},
     ),
     Persona(

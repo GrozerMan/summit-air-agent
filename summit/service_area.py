@@ -36,7 +36,9 @@ _UNITS = re.compile(
     r"\b(\d+|" + "|".join(_NUMBER_WORDS) + r")[\s-]*(?:units?|apartments?|famil(?:y|ies)|tenants?)\b", re.I
 )
 _MAX_RESIDENTIAL_UNITS = 4
-_OWNS_BUILDING = re.compile(r"\b(?:i|we)\s+own\b|\b(?:my|our)\s+(?:building|property)\b|\bi'?m\s+the\s+owner\b", re.I)
+_OWNS_BUILDING = re.compile(
+    r"\b(?:i|we)\s+own\b|\b(?:my|our)\s+(?:building|property)\b|\bi'?m\s+the\s+owner\b", re.I
+)
 
 _STATES = (
     "alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|"
@@ -92,7 +94,7 @@ def load_area(cfg: dict[str, Any], csv_path: Path) -> None:
 
 
 def normalize_place(text: str) -> str:
-    """"Rockville Centre, NY" and "rockville center" both become "rockville center"."""
+    """ "Rockville Centre, NY" and "rockville center" both become "rockville center"."""
     text = text.lower().replace("’", "'").replace("'", "").replace(".", "")
     words = re.sub(r"[^a-z0-9]+", " ", text).split()
     swaps = {"centre": "center", "saint": "st", "mount": "mt", "fort": "ft"}
@@ -122,10 +124,14 @@ def served_areas(cfg: dict[str, Any]) -> str:
 def check_zip(raw: str, cfg: dict[str, Any]) -> AreaCheck:
     zip_code = normalize_zip(raw)
     if zip_code is None:
-        return AreaCheck(False, None, None, f"'{raw}' isn't a 5-digit ZIP. Ask them to repeat it.", ask_zip=True)
+        return AreaCheck(
+            False, None, None, f"'{raw}' isn't a 5-digit ZIP. Ask them to repeat it.", ask_zip=True
+        )
     county = cfg["service_area"]["zips"].get(zip_code)
     if county:
-        return AreaCheck(True, county, zip_code, f"{zip_code} is in {area_name(county, cfg)}, which we serve.")
+        return AreaCheck(
+            True, county, zip_code, f"{zip_code} is in {area_name(county, cfg)}, which we serve."
+        )
     return _out_of_area(zip_code, cfg)
 
 
@@ -137,9 +143,7 @@ def check_town(town: str, cfg: dict[str, Any], zip_code: str | None = None) -> A
     if key not in places and _OTHER_STATES.search(town.strip()):
         return _out_of_area(zip_code, cfg, place=town)
     if key in _ASK_BOROUGH:
-        return AreaCheck(
-            False, None, zip_code, "Ask which borough, or better, the ZIP code.", ask_zip=True
-        )
+        return AreaCheck(False, None, zip_code, "Ask which borough, or better, the ZIP code.", ask_zip=True)
 
     match, guessed = key, False
     if key not in places:
@@ -172,7 +176,9 @@ def check_town(town: str, cfg: dict[str, Any], zip_code: str | None = None) -> A
     return AreaCheck(True, county, zip_code, message)
 
 
-_WHERE_I_AM = re.compile(r"\b(?:im|i am|were|we are|here|live|living|staying)\s+(?:\w+\s+){0,3}?(?:in|at)\s+$")
+_WHERE_I_AM = re.compile(
+    r"\b(?:im|i am|were|we are|here|live|living|staying)\s+(?:\w+\s+){0,3}?(?:in|at)\s+$"
+)
 
 
 def place_in(sentence: str, cfg: dict[str, Any], only_mine: bool = False) -> tuple[str, str | None] | None:

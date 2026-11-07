@@ -18,7 +18,9 @@ _TENS = {
 }  # fmt: skip
 _UNITS = {k: v for k, v in _DIGIT_WORDS.items() if v != "0"}
 # "516 555 0142, no wait, 0124": what comes after one of these replaces the end.
-_CORRECTION = re.compile(r"\b(?:no\s+wait|wait\s+no|i\s+mean|sorry|actually|correction|scratch\s+that)\b", re.I)
+_CORRECTION = re.compile(
+    r"\b(?:no\s+wait|wait\s+no|i\s+mean|sorry|actually|correction|scratch\s+that)\b", re.I
+)
 
 
 def spoken_digits(text: str) -> str:

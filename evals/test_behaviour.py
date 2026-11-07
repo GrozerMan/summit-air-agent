@@ -3,8 +3,6 @@
 uv run pytest evals -m eval
 """
 
-import json
-
 import pytest
 from livekit.agents import AgentSession, inference
 

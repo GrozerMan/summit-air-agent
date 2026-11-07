@@ -67,7 +67,9 @@ def test_another_number_needs_phone_last_name_and_zip(make_call):
     call = make_call(None)
     with pytest.raises(ActionRefused, match="ZIP"):
         call.lookup_customer(phone="914 555 0188", last_name="klein")
-    assert call.lookup_customer(phone="914 555 0188", last_name="klein", zip_code="10601").startswith("Verified")
+    assert call.lookup_customer(phone="914 555 0188", last_name="klein", zip_code="10601").startswith(
+        "Verified"
+    )
     assert "lapsed" in call.lookup_customer()
 
 
@@ -134,7 +136,9 @@ def test_third_attempt_can_still_succeed(make_call):
     call = make_call("+12125550000")
     call.lookup_customer(phone="5165550142", last_name="Reyes", zip_code="11510")
     call.lookup_customer(phone="5165550142", last_name="Reyes", zip_code="11516")
-    assert call.lookup_customer(phone="5165550142", last_name="Reyes", zip_code="11501").startswith("Verified")
+    assert call.lookup_customer(phone="5165550142", last_name="Reyes", zip_code="11501").startswith(
+        "Verified"
+    )
 
 
 # Triage through the session
@@ -519,7 +523,9 @@ def test_booking_confirmation_is_fixed_text_from_the_booking(make_call):
     result = call.book_appointment(option_id, **GOOD_BOOKING)
     confirmation = call.take_announcement()
     assert confirmation.startswith("You're booked.")
-    assert option.speakable(TUESDAY_10AM.date()) in confirmation and "9 Birch Court, Huntington" in confirmation
+    assert (
+        option.speakable(TUESDAY_10AM.date()) in confirmation and "9 Birch Court, Huntington" in confirmation
+    )
     assert "$129" in confirmation  # non-member diagnostic, from config
     assert confirmation in result and "don't repeat it" in result
     assert call.take_announcement() is None  # spoken once
@@ -538,7 +544,10 @@ def test_hang_up_flags_a_booking_claim_with_no_appointment(make_call, seeded):
     ready_to_book(call)
     transcript = [
         {"role": "user", "text": "My number's 631 555 0111, no wait, 0112."},
-        {"role": "assistant", "text": "Your appointment is set for tomorrow between 10 and noon at 81 Linden Lane."},
+        {
+            "role": "assistant",
+            "text": "Your appointment is set for tomorrow between 10 and noon at 81 Linden Lane.",
+        },
     ]
     call.finalize(transcript)
     assert call.false_claims and "set for tomorrow" in call.false_claims[0]
@@ -580,7 +589,9 @@ def test_a_read_back_of_the_wrong_number_is_refused(make_call):
 def test_a_spoken_digit_read_back_counts(make_call):
     call = make_call(None)
     option = ready_to_book(call)
-    call.agent_said = "Six three one, five five five, oh one two three. And that's 9 Birch Court in Huntington?"
+    call.agent_said = (
+        "Six three one, five five five, oh one two three. And that's 9 Birch Court in Huntington?"
+    )
     assert call.book_appointment(option, **GOOD_BOOKING).startswith("Booked")
 
 
@@ -589,7 +600,9 @@ def test_a_spoken_digit_read_back_counts(make_call):
 
 def test_urgent_caller_who_hangs_up_before_the_address_gets_a_callback(make_call, seeded):
     call = make_call("+16315550111")
-    call.assess_situation(Facts(no_heat=True, vulnerable_occupant=True, indoor_temp_f=60, description="newborn"))
+    call.assess_situation(
+        Facts(no_heat=True, vulnerable_occupant=True, indoor_temp_f=60, description="newborn")
+    )
     call.finalize([{"role": "user", "text": "Our heat is out and we have a newborn."}])
     callbacks = seeded.callbacks_for_call("call-1")
     assert len(callbacks) == 1 and callbacks[0]["urgent"] == 1

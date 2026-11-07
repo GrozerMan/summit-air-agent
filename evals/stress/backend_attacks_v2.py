@@ -18,7 +18,7 @@ from summit import config
 from summit.backend import ActionRefused, CallSession
 from summit.claims import false_claims
 from summit.hazard_words import hazard_in
-from summit.models import Pool, Priority
+from summit.models import Priority
 from summit.scheduling import Scheduler
 from summit.seed import DEMO_MEMBER_PHONE, SHARED_HOUSEHOLD_PHONE, seed
 from summit.store import Store

@@ -3,6 +3,10 @@ from datetime import date
 from enum import IntEnum, StrEnum
 
 
+class ActionRefused(Exception):
+    """The backend won't do what the model asked. The message says what's missing."""
+
+
 class Priority(IntEnum):
     """Lower is more urgent, so `min()` picks the more serious of two priorities."""
 
