@@ -172,16 +172,36 @@ def check_town(town: str, cfg: dict[str, Any], zip_code: str | None = None) -> A
     return AreaCheck(True, county, zip_code, message)
 
 
-def place_in(sentence: str, cfg: dict[str, Any]) -> tuple[str, str | None] | None:
-    """A served place named in a sentence: (name, county), county None if ambiguous."""
+_WHERE_I_AM = re.compile(r"\b(?:im|i am|were|we are|here|live|living|staying)\s+(?:\w+\s+){0,3}?(?:in|at)\s+$")
+
+
+def place_in(sentence: str, cfg: dict[str, Any], only_mine: bool = False) -> tuple[str, str | None] | None:
+    """A served place named in a sentence: (name, county), county None if ambiguous.
+
+    With several ("my mom in Huntington is fine but I'm in Yonkers"), the one the
+    caller says they're at wins, otherwise the last one mentioned. `only_mine` takes
+    only a place the caller says they're at ("I'm in Yonkers", not "my sister lives in Yonkers")."""
     text = f" {normalize_place(sentence)} "
-    best = None
-    for key, (name, counties) in cfg["service_area"]["places"].items():
-        if f" {key} " in text and (best is None or len(key) > len(best[0])):
-            best = (key, name, counties)
-    if best is None:
+    found: list[tuple[int, int, str]] = []  # (start, -length, key)
+    for key in cfg["service_area"]["places"]:
+        start = text.find(f" {key} ")
+        while start != -1:
+            found.append((start + 1, -len(key), key))
+            start = text.find(f" {key} ", start + 1)
+    if not found:
         return None
-    _, name, counties = best
+    # Drop names inside longer ones ("park" inside "park slope").
+    found.sort()
+    kept: list[tuple[int, int, str]] = []
+    for start, neg_len, key in found:
+        if kept and start < kept[-1][0] - kept[-1][1]:
+            continue
+        kept.append((start, neg_len, key))
+    mine = [k for k in kept if _WHERE_I_AM.search(text[: k[0]])]
+    if only_mine and not mine:
+        return None
+    _, _, key = (mine or kept)[-1]
+    name, counties = cfg["service_area"]["places"][key]
     return name, next(iter(counties)) if len(counties) == 1 else None
 
 

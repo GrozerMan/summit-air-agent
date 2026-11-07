@@ -341,10 +341,12 @@ class CallSession:
         learned later doesn't make it count as "not read yet" and get read twice."""
         assert self.assessment and self.assessment.priority == Priority.P0
         if self.p0_script is None:
+            # Where they say they are beats where caller ID says they live: the call may be
+            # from a rental, a parent's house or a cell phone.
             county = (
                 (self.area and self.area.county)
-                or (self.caller_match and self.caller_match.county)
                 or self.hazard_place.get("county")
+                or (self.caller_match and self.caller_match.county)
             )
             self.p0_script = safety_script(self.assessment.hazard or "", county or None, self.cfg)
         return self.p0_script
@@ -360,20 +362,27 @@ class CallSession:
         )
 
     def _place_in(self, text: str) -> dict[str, str]:
-        """A ZIP or one of our towns said in the same sentence as the hazard."""
-        for sentence in re.split(r"(?<=[.!?])\s+", text):
-            if not hazard_in(sentence):
-                continue
+        """Where the caller is, from the turn that reported the hazard: a ZIP or one of
+        our places, from the hazard's own sentence if it has one, else the rest of the turn."""
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        # The hazard's sentence takes any place; another sentence only one the caller is at
+        # ("I smell gas. I'm in Yonkers." but not "My sister lives in Yonkers. I smell gas.").
+        ordered = [(s, False) for s in sentences if hazard_in(s)] + [
+            (s, True) for s in sentences if not hazard_in(s)
+        ]
+        for sentence, only_mine in ordered:
             place: dict[str, str] = {}
-            named = place_in(sentence, self.cfg)
+            named = place_in(sentence, self.cfg, only_mine=only_mine)
             if named:
                 place["town"] = named[0]
                 if named[1]:
                     place["county"] = named[1]
-            zip_match = re.search(r"\b\d{5}\b", sentence)
-            if zip_match:
-                place["zip"] = zip_match[0]
-                check = check_zip(zip_match[0], self.cfg)
+            # "10701" or "1 0 7 0 1"
+            zip_match = re.search(r"(?<!\d)\d(?:[\s-]?\d){4}(?![\s-]?\d)", sentence)
+            if zip_match and (not only_mine or named):
+                zip_code = re.sub(r"\D", "", zip_match[0])
+                place["zip"] = zip_code
+                check = check_zip(zip_code, self.cfg)
                 if check.in_area and check.county:
                     # A ZIP is more precise than a town name.
                     place["county"] = check.county

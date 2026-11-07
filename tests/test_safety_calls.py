@@ -106,3 +106,33 @@ def test_cant_leave_after_saying_bye_gets_the_fixed_answer(make_call):
     call.screen_caller_turn("okay bye", said_so_far=script)
     answer = call.screen_caller_turn("wait, I can't leave, my mom is in a wheelchair", said_so_far=script)
     assert "hang up and call nine-one-one" in answer and not call.caller_leaving
+
+
+def test_a_place_the_caller_is_at_in_the_next_sentence_names_the_utility(make_call):
+    script = make_call(None).screen_caller_turn("I smell gas. I'm in Yonkers.")
+    assert "Con Edison" in script
+
+
+def test_a_zip_read_digit_by_digit_names_the_utility(make_call):
+    script = make_call(None).screen_caller_turn("There's a gas smell at my place, 1 0 7 0 1")
+    assert "Con Edison" in script
+
+
+def test_where_the_caller_is_beats_caller_id(make_call):
+    # Dana lives in Nassau (National Grid) but is calling about her rental in Yonkers.
+    from summit.seed import DEMO_MEMBER_PHONE
+
+    script = make_call(DEMO_MEMBER_PHONE).screen_caller_turn(
+        "Yes, it's Dana. I'm at my rental in Yonkers, 10701, and I smell gas."
+    )
+    assert "Con Edison" in script
+
+
+def test_of_two_places_the_one_the_caller_is_at_wins(make_call):
+    script = make_call(None).screen_caller_turn("My mom in Huntington is fine but I'm in Yonkers and I smell gas")
+    assert "Con Edison" in script
+
+
+def test_nyc_borough_gets_its_utility_and_queens_stays_generic(make_call):
+    assert "National Grid at seven one eight" in make_call(None).screen_caller_turn("I smell gas in Park Slope")
+    assert "your gas company" in make_call(None).screen_caller_turn("I smell gas, I'm in Astoria")
