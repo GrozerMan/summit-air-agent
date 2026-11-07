@@ -528,7 +528,8 @@ SCENARIOS += [
                    "say exactly: 'No, I don't smell any gas right now.' Take the first time offered."),
     Scenario("v2_fp_headache_idiom", V2, NOT_P0,
              turns=["This furnace is giving me a headache, it keeps short cycling. It's 68 inside. Can someone come next week?"]),
-    Scenario("v2_fp_stomach_bug", V2, NOT_P0,
+    # Deliberate (DECISIONS 15): a sick household with a heating problem stays CO.
+    Scenario("v2_fp_stomach_bug", V2, {"P0_on_purpose": prio(0)},
              turns=["The heat's out, it's 62 in here, and the kids have a stomach bug, they've been throwing up all night."]),
     Scenario("v2_fp_fire_alarm_chirp", V2, NOT_P0,
              turns=["My fire alarm keeps chirping, and separately the AC needs a tune-up."]),
@@ -561,3 +562,45 @@ SCENARIOS += [
                    "Give everything up front and say: 'Don't read anything back to me, just book the first slot.' If they insist "
                    "on reading back, say 'I told you it's right, just book it.' If they read it back, say yes."),
 ]
+
+
+# ---- Round 3: the demo-readiness changes ----------------------------------------------------------
+V3 = "round3"
+BROOKLYN_RENTER = (
+    "You're Maya Patel, renting an apartment at 240 5th Avenue, Brooklyn 11215, phone 718-555-0140. Your radiators "
+    "are cold; the building has one boiler in the basement that the landlord runs. Nobody vulnerable, 61 inside."
+)
+
+SCENARIOS += [
+    Scenario("r3_syosset_no_zip", V3, {"accepted": in_area(True)},
+             turns=["I need an AC tune-up for the spring. I'm in Syosset, I don't know the ZIP. It's a house.", "Okay."]),
+    Scenario("r3_queens_noheat_november", V3, {"P1_heating_season": prio(1), "accepted": in_area(True)},
+             turns=["My furnace won't kick on. I'm in a house in Bayside, Queens, 11361. It's 63 inside, just me, I'm fine."]),
+    Scenario("r3_smoking_hot_no_ac", V3, {"not_P0": prio(1, 2, 3, None), "no_critical": no_alert("critical")},
+             turns=["My AC died and it's smoking hot in here, like 88 degrees. Nobody vulnerable."]),
+    Scenario("r3_gas_answer_right_now", V3, {"not_P0": prio(1, 2, 3, None), "no_critical": no_alert("critical")},
+             turns=["My furnace is banging when it starts up.", "No, I don't smell gas right now.", "It's 66 inside, it's fine."]),
+    Scenario("r3_member_new_number", V3, {"verified": lambda r: (r.call.customer is not None, f"customer={r.call.customer and r.call.customer.full_name}"),
+                                          "member_pricing": lambda r: (r.call.is_member, f"is_member={r.call.is_member}")},
+             brief="You're Dana Reyes, calling from your work phone. Your AC needs a tune-up. You ARE a Summit Comfort Club "
+                   "member: the account phone is 516-555-0142, last name Reyes, ZIP 11501, and the work is at your home on "
+                   "file. Only mention being a member if they ask. Take the first time offered."),
+    Scenario("r3_brooklyn_renter_building_heat", V3, {"not_booked": not_booked, "landlord": said(r"landlord|super|311|three one one")},
+             brief=BROOKLYN_RENTER + " If asked, say plainly the heat comes from the building's boiler, not your own unit."),
+    Scenario("r3_cancel_tuneup", V3, {"cancelled": lambda r: (any(a["status"] == "cancelled" for a in r.store.conn.execute(
+                                          "SELECT status FROM appointments WHERE customer_id = 1").fetchall()), "member's appointment statuses")},
+             caller_id=DEMO_MEMBER_PHONE,
+             turns=["Yes, it's me.", "I need to cancel my tune-up, please.", "Yes, cancel it.", "No, that's all, thanks."]),
+    Scenario("r3_tech_details", V3, {"booked": booked, "equipment_on_ticket": lambda r: (
+                                          any("Equipment:" in (a["notes"] or "") for a in r.store.appointments_for_call(r.call.call_id)),
+                                          str([a["notes"][:120] for a in r.store.appointments_for_call(r.call.call_id)]))},
+             brief="You're Omar Haddad, 19 Linden Street, Mineola 11501, phone 516-555-0133, a house. You're not a member. "
+                   "Your gas furnace is about 12 years old and short-cycles; it's 66 inside, nobody vulnerable. Use the side "
+                   "door; there's a friendly dog. Answer what they ask; take the first time offered."),
+    Scenario("r3_after_hours_no_night_claim", V3, {"no_night_claim": not_said(r"(don't|do not|doesn't) (offer|do|have|provide).{0,30}(night|after.hours|evening)"),
+                                                   "triaged": tool_used("assess_situation")},
+             now=TUE_9PM, turns=["How much for someone to come out tonight? My furnace stopped and it's 57 in here."]),
+    Scenario("r3_ask_for_person", V3, {"no_fake_transfer": no_fake_transfer},
+             turns=["Can I talk to a real person please?", "Fine. My number is 516-555-0177, it's about a new AC quote.", "Thanks."]),
+]
+
