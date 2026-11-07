@@ -59,10 +59,13 @@ _WORDS_ONLY_CALLBACK = (
 )
 
 
-_REPAIR_WORDS = (
-    "repair", "fix", "part", "capacitor", "compressor", "motor", "fan", "coil", "blower", "igniter",
-    "ignitor", "thermostat", "sensor", "circuit board", "control board", "valve", "refrigerant", "freon",
-    "recharge", "leak", "how much will", "total",
+# Asking what a repair or part costs. Matched as whole words: "part" used to match
+# "apartment", "fan" matched "infant" and "total" matched "totally".
+_REPAIR_COST_WORDS = ("repair", "repairs", "fix", "fixing", "part", "parts", "replace", "replacing", "how much will", "total")
+# Components: a question about one of these is a repair question, unless it's about the visit.
+_COMPONENT_WORDS = (
+    "capacitor", "compressor", "motor", "fan", "coil", "blower", "igniter", "ignitor", "thermostat",
+    "sensor", "circuit board", "control board", "valve", "refrigerant", "freon", "recharge", "leak",
 )  # fmt: skip
 _SYSTEM_WORDS = (
     "new system", "new unit", "new furnace", "new boiler", "new ac", "new a/c", "new air conditioner",
@@ -75,6 +78,10 @@ _AFTER_HOURS_WORDS = (
     "holiday", "late",
 )  # fmt: skip
 _VISIT_WORDS = ("diagnos", "service call", "visit", "come out", "trip", "look at", "send someone")
+
+
+def _any_word(text: str, words: Iterable[str]) -> bool:
+    return any(re.search(rf"\b{re.escape(w)}\b", text) for w in words)
 
 
 def _squash(text: str) -> str:
@@ -907,25 +914,32 @@ class CallSession:
         )
 
     def get_pricing(self, item: str) -> str:
+        if not any(n.startswith("asked about pricing") for n in self.notes):
+            self.note(f"asked about pricing ({item.strip()[:80]})")
         text = item.lower()
         p = self.cfg["pricing"]
-        after_hours = any(w in text for w in _AFTER_HOURS_WORDS)
+        after_hours = _any_word(text, _AFTER_HOURS_WORDS)
         surcharge = f" Visits outside office hours add ${p['after_hours_surcharge']}." if after_hours else ""
+        system = _any_word(text, _SYSTEM_WORDS)
+        visit = any(w in text for w in _VISIT_WORDS)  # stems: "diagnos" covers diagnostic
+        repair = (_any_word(text, _REPAIR_COST_WORDS) and not system) or (
+            _any_word(text, _COMPONENT_WORDS) and not visit
+        )
         # Repairs and parts first: "a replacement capacitor" is a repair, not a free estimate.
-        if any(w in text for w in _REPAIR_WORDS):
+        if repair:
             # No figure at all here: a "$129" next to "capacitor" gets relayed as the part's price.
             return (
                 "Don't give a price for the repair or the part. The technician diagnoses it and quotes on "
                 "site before any work starts. If they ask what the visit costs, look up the diagnostic visit."
             )
-        if any(w in text for w in _SYSTEM_WORDS):
+        if system:
             return "Estimates for a new or replacement system are free."
         if "tune" in text or "maintenance" in text:
             return f"A tune-up is ${p['tune_up']}. Members get two a year included." + surcharge
-        if any(w in text for w in ("member", "club", "plan")):
+        if _any_word(text, ("member", "members", "membership", "club", "plan")) and not visit:
             benefits = ", ".join(self.cfg["membership"]["benefits"])
             return f"{self.cfg['membership']['name']}: {benefits}. The office can go over membership pricing."
-        if after_hours or any(w in text for w in _VISIT_WORDS):
+        if after_hours or visit or _any_word(text, ("appointment", "come", "cost", "charge", "fee")):
             # Always the base and the surcharge together, never "+$99" on its own.
             return self._diagnostic_price() + surcharge
         return "Don't estimate repairs. The technician quotes on site before any work starts."
@@ -1023,8 +1037,13 @@ class CallSession:
         say otherwise. The caller is now expecting a technician or a call that isn't coming,
         so the office has to hear about it."""
         said = " ".join(t.get("text", "") for t in transcript if t.get("role") == "assistant")
+        # A customer's existing appointment can back "you're scheduled for Thursday", but not
+        # a claim that today's new problem was booked when nothing was.
+        new_problem = self.priority in (Priority.P1, Priority.P2)
         has_booking = bool(self.booked) or bool(
-            self.customer and self.store.upcoming_appointments(self.customer.id, self.now().date())
+            self.customer
+            and not new_problem
+            and self.store.upcoming_appointments(self.customer.id, self.now().date())
         )
         self.false_claims = false_claims(said, has_booking=has_booking, has_callback=bool(self.callbacks))
         if not self.false_claims:
