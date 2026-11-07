@@ -276,7 +276,7 @@ class CallSession:
 
     def assess_situation(self, facts: Facts) -> str:
         self.facts = self.facts.updated_with(facts)
-        fresh = assess(self.facts, self.cfg, heard=self.heard)
+        fresh = assess(self.facts, self.cfg, heard=self.heard, today=self.now().date())
         previous = self.assessment
 
         if previous and previous.priority <= fresh.priority:

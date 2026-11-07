@@ -1,7 +1,9 @@
+from datetime import date
+
 import pytest
 
 from summit.models import Priority
-from summit.triage import Facts, assess, cannot_leave_script, safety_script
+from summit.triage import Facts, assess, cannot_leave_script, in_heating_season, safety_script
 
 
 def priority(cfg, **facts):
@@ -118,3 +120,33 @@ def test_dusty_first_use_description_stays_routine(cfg):
         description="dusty burning smell, first time turning the heat on this year, gas furnace",
     )
     assert assess(facts, cfg).priority == Priority.P3
+
+
+# The heating season: "no heat in winter" is urgent on its own (the owner's rule).
+NOV_3 = date(2026, 11, 3)
+JULY_9 = date(2026, 7, 9)
+
+
+def test_no_heat_in_heating_season_is_urgent(cfg):
+    result = assess(Facts(no_heat=True), cfg, today=NOV_3)
+    assert result.priority == Priority.P1
+    assert "no heat during the heating season" in result.reasons
+
+
+def test_no_heat_out_of_season_is_not_urgent_by_itself(cfg):
+    assert assess(Facts(no_heat=True, indoor_temp_f=70), cfg, today=JULY_9).priority == Priority.P2
+
+
+def test_no_heat_in_season_but_comfortable_inside_waits(cfg):
+    assert assess(Facts(no_heat=True, indoor_temp_f=68), cfg, today=NOV_3).priority == Priority.P2
+
+
+def test_heating_season_wraps_the_new_year(cfg):
+    assert in_heating_season(date(2027, 1, 15), cfg)
+    assert in_heating_season(date(2026, 10, 1), cfg)
+    assert in_heating_season(date(2027, 5, 31), cfg)
+    assert not in_heating_season(date(2027, 6, 1), cfg)
+
+
+def test_no_cooling_is_not_affected_by_the_season(cfg):
+    assert assess(Facts(no_cooling=True, indoor_temp_f=80), cfg, today=JULY_9).priority == Priority.P2

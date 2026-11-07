@@ -8,7 +8,8 @@ fired so the office can see why a call was rated the way it was.
         All three also come from the caller's own words (hazard_words), so a
         model that reports gas_smell=false for "smelled like a skunk", or never
         reports the sparks at all, can't keep the call out of P0.
-    P1  no heat with a vulnerable occupant or indoor temp at/below the threshold
+    P1  no heat during the heating season (unless it's known to be comfortable inside)
+        no heat with a vulnerable occupant or indoor temp at/below the threshold
         no cooling with a vulnerable occupant or indoor temp at/above the threshold
         persistent burning smell, active leak
     P2  no heat or no cooling otherwise, minor drip
@@ -16,6 +17,7 @@ fired so the office can see why a call was rated the way it was.
 """
 
 from dataclasses import dataclass, field, fields, replace
+from datetime import date
 from typing import Any
 
 from summit.hazard_words import hazard_in
@@ -78,8 +80,18 @@ class Assessment:
     ask_next: list[str] = field(default_factory=list)
 
 
-def assess(facts: Facts, cfg: dict[str, Any], heard: set[str] | None = None) -> Assessment:
-    """`heard` is hazards already found in the caller's own words this call (the screen)."""
+def in_heating_season(day: date, cfg: dict[str, Any]) -> bool:
+    """`heating_season` is ["MM-DD", "MM-DD"] and may wrap the new year (Oct 1 to May 31)."""
+    start, end = cfg["triage"]["heating_season"]
+    today = f"{day:%m-%d}"
+    return start <= today <= end if start <= end else today >= start or today <= end
+
+
+def assess(
+    facts: Facts, cfg: dict[str, Any], heard: set[str] | None = None, today: date | None = None
+) -> Assessment:
+    """`heard` is hazards already found in the caller's own words this call (the screen).
+    `today` turns on the heating-season rule; without it, triage is season-blind."""
     rules = cfg["triage"]
 
     heard = set(heard or ()) | {hazard_in(facts.description)}
@@ -101,6 +113,10 @@ def assess(facts: Facts, cfg: dict[str, Any], heard: set[str] | None = None) -> 
     reasons: list[str] = []
 
     if facts.no_heat:
+        comfortable = temp is not None and temp >= rules["no_heat_season_ok_indoor_f"]
+        if today is not None and in_heating_season(today, cfg) and not comfortable:
+            # The owner's rule: no heat in winter is urgent on its own.
+            reasons.append("no heat during the heating season")
         if vulnerable:
             reasons.append("no heat with a vulnerable occupant")
         if temp is not None and temp <= rules["no_heat_max_indoor_f"]:

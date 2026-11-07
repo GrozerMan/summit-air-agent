@@ -193,6 +193,12 @@ name = "Con Edison"
 phone = "1-800-752-6633"
 
 [triage]
+# No heat in this stretch of the year is urgent on its own (the owner's rule; the dates
+# match NYC's legal heat season). Every such call can use the emergency reserve, so in a
+# cold snap the reserve runs out faster and callers get an urgent dispatcher callback.
+heating_season = ["10-01", "05-31"]
+# ...unless the caller says it's at least this warm inside.
+no_heat_season_ok_indoor_f = 65
 no_heat_max_indoor_f = 58
 no_cooling_min_indoor_f = 85
 p1_within_hours = 24

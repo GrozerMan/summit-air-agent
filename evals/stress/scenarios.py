@@ -330,16 +330,19 @@ SCENARIOS: list[Scenario] = [
 
     # ---- 2. Triage -------------------------------------------------------------------------
     Scenario("t_noheat_58", "triage", {"P1": prio(1)}, turns=["My heat's out. It's 58 degrees inside. It's just me and I'm healthy."]),
-    Scenario("t_noheat_59", "triage", {"P2": prio(2)}, turns=["My heat's out. It's 59 degrees inside. It's just me and I'm healthy."]),
+    Scenario("t_noheat_59", "triage", {"P1_heating_season": prio(1)}, turns=["My heat's out. It's 59 degrees inside. It's just me and I'm healthy."]),
     Scenario("t_noheat_57", "triage", {"P1": prio(1)}, turns=["My heat's out. It's 57 degrees inside. Just me, I'm healthy."]),
     Scenario("t_nocool_84", "triage", {"P2": prio(2)}, turns=["My AC died. It's 84 inside. Nobody vulnerable, just me."]),
     Scenario("t_nocool_85", "triage", {"P1": prio(1)}, turns=["My AC died. It's 85 inside. Nobody vulnerable, just me."]),
     Scenario("t_nocool_86", "triage", {"P1": prio(1)}, turns=["My AC died. It's 86 inside. Nobody vulnerable, just me."]),
-    Scenario("t_freezing_vague", "triage", {"asks_temp": said(r"temperature|how (cold|warm)|degrees"), "not_P1_without_facts": prio(2)},
+    # Every eval call is on Tue 3 Nov, inside the heating season: no heat is P1 on its own.
+    Scenario("t_freezing_vague", "triage", {"P1_heating_season": prio(1)},
              turns=["My heat stopped working and it's freezing in here."]),
-    Scenario("t_60ish", "triage", {"P2": prio(2)}, turns=["The heat stopped. It's like 60-ish in here. Just me and my husband, we're fine."]),
-    Scenario("t_15_outside", "triage", {"P2_until_indoor_known": prio(2), "asks_indoor": said(r"inside|indoor")},
+    Scenario("t_60ish", "triage", {"P1_heating_season": prio(1)}, turns=["The heat stopped. It's like 60-ish in here. Just me and my husband, we're fine."]),
+    Scenario("t_15_outside", "triage", {"P1_heating_season": prio(1)},
              turns=["My heat's out and it's 15 degrees outside. Nobody vulnerable here."]),
+    Scenario("t_noheat_comfortable", "triage", {"P2_warm_inside": prio(2)},
+             turns=["The heat isn't coming on, but honestly it's 69 in here, it's a mild day. Just me, I'm healthy."]),
     Scenario("t_celsius", "triage", {"P1_14C=57F": prio(1)}, turns=["The heat's out. It's 14 degrees Celsius in the house. Just me, I'm healthy."]),
     Scenario("t_newborn", "triage", {"P1": prio(1)}, turns=["Our heat stopped working and we have a two-week-old baby. It's 64 inside."]),
     Scenario("t_92_mother", "triage", {"P1": prio(1)}, turns=["The furnace quit. It's 63 in here and my 92-year-old mother lives with me."]),
