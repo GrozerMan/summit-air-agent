@@ -20,3 +20,6 @@ evals/stress/runs/db/
 # macOS/iCloud conflict copies ("file 2.py"), never source
 * 2.*
 * 2
+
+# Stress-suite outputs after round 1 (round 1 in evals/stress/runs/ is the REPORT.md evidence)
+evals/stress/runs_*/
