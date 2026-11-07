@@ -49,16 +49,25 @@ def test_confirming_the_name_verifies(member_call):
 
 
 def test_nothing_is_revealed_without_verification(make_call):
-    call = make_call("+15165550142")
+    call = make_call(None)
     with pytest.raises(ActionRefused):
         call.lookup_customer()
-    result = call.lookup_customer(phone="516-555-0142", last_name="Somebody")
+    result = call.lookup_customer(phone="516-555-0142", last_name="Somebody", zip_code="11501")
     assert "Elm" not in result and "member" not in result.lower()
 
 
-def test_phone_plus_last_name_verifies(make_call):
+def test_the_greeting_question_must_be_answered_before_a_lookup(member_call):
+    # The son who never says "no": his mother's phone, her surname and her ZIP.
+    with pytest.raises(ActionRefused, match="confirmed_name"):
+        member_call.lookup_customer(last_name="Reyes", zip_code="11501")
+    assert member_call.customer is None
+
+
+def test_another_number_needs_phone_last_name_and_zip(make_call):
     call = make_call(None)
-    assert call.lookup_customer(phone="914 555 0188", last_name="klein").startswith("Verified")
+    with pytest.raises(ActionRefused, match="ZIP"):
+        call.lookup_customer(phone="914 555 0188", last_name="klein")
+    assert call.lookup_customer(phone="914 555 0188", last_name="klein", zip_code="10601").startswith("Verified")
     assert "lapsed" in call.lookup_customer()
 
 
@@ -115,17 +124,17 @@ def test_after_a_no_they_can_still_verify_their_own_account(member_call):
 def test_lookups_are_capped_at_three_per_call(make_call):
     call = make_call("+12125550000")
     for guess in ("11510", "11516", "11518"):
-        call.lookup_customer(phone="5165550142", zip_code=guess)
+        call.lookup_customer(phone="5165550142", last_name="Reyes", zip_code=guess)
     with pytest.raises(ActionRefused, match="Too many"):
-        call.lookup_customer(phone="5165550142", zip_code="11501")  # the right ZIP, too late
+        call.lookup_customer(phone="5165550142", last_name="Reyes", zip_code="11501")  # right ZIP, too late
     assert call.customer is None
 
 
 def test_third_attempt_can_still_succeed(make_call):
     call = make_call("+12125550000")
-    call.lookup_customer(phone="5165550142", zip_code="11510")
-    call.lookup_customer(phone="5165550142", zip_code="11516")
-    assert call.lookup_customer(phone="5165550142", zip_code="11501").startswith("Verified")
+    call.lookup_customer(phone="5165550142", last_name="Reyes", zip_code="11510")
+    call.lookup_customer(phone="5165550142", last_name="Reyes", zip_code="11516")
+    assert call.lookup_customer(phone="5165550142", last_name="Reyes", zip_code="11501").startswith("Verified")
 
 
 # Triage through the session
@@ -256,7 +265,13 @@ def test_unverified_booking_does_not_overwrite_the_account(make_call, seeded):
     dana = seeded.customers_by_phone("+15165550142")
     assert len(dana) == 1 and dana[0].first_name == "Dana" and dana[0].address.startswith("12 Elm")
     appointment = seeded.appointments_for_call("call-1")[0]
-    assert appointment["contact_name"] == "Chris Ortiz" and appointment["customer_id"] == dana[0].id
+    # H8: the stranger's visit is theirs, not Dana's, and the office is told about the match.
+    assert appointment["contact_name"] == "Chris Ortiz" and appointment["customer_id"] != dana[0].id
+    assert "phone matches existing customer" in appointment["notes"]
+    # Dana is still greeted by name, and her account doesn't show Chris's visit.
+    dana_call = make_call("+15165550142", call_id="call-2")
+    assert "Am I speaking with Dana" in dana_call.greeting()
+    assert "Other St" not in dana_call.lookup_customer(confirmed_name=True)
 
 
 def test_unverified_caller_gets_non_member_pricing(make_call):
@@ -293,7 +308,7 @@ def test_reschedule_releases_the_old_window(member_call, seeded):
 
 def test_cannot_touch_someone_elses_appointment(make_call, seeded):
     call = make_call(None)
-    call.lookup_customer(phone="631 555 0177", last_name="Shah")
+    call.lookup_customer(phone="631 555 0177", last_name="Shah", zip_code="11743")
     with pytest.raises(ActionRefused, match="isn't an upcoming appointment"):
         call.find_appointment_options(reschedule_appointment_id=1)
 

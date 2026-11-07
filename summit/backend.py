@@ -186,6 +186,13 @@ class CallSession:
 
         if confirmed_name and self.caller_match:
             return self._verify(self.caller_match)
+        if confirmed_name is None and self.caller_match:
+            # The greeting asked "Am I speaking with Dana?". Without the answer, the son who
+            # never says "no" would verify as his mother from her own phone with her ZIP.
+            raise ActionRefused(
+                f"The greeting asked if this is {self.caller_match.first_name}. Call lookup_customer with "
+                "confirmed_name set to their answer (true or false) first."
+            )
         if confirmed_name is False:
             # "No, I'm her son." Whoever this is, caller ID is now evidence of nothing,
             # and the person they said they aren't stays unverifiable on this call.
@@ -209,11 +216,20 @@ class CallSession:
                 )
         else:
             number = normalize_phone(phone) or self.caller_id
-            if not number or not (last_name or zip_code):
+            if not number:
                 raise ActionRefused(
-                    "To look up an account, ask for the phone number on the account plus their "
-                    "last name or ZIP code."
+                    "To look up an account, ask for the phone number on the account, their last name "
+                    "and their ZIP code."
                 )
+            if number != self.caller_id and not (last_name and zip_code):
+                # Calling from a different number: knowing a phone number and a surname is
+                # easy for a stranger, so all three.
+                raise ActionRefused(
+                    "They're calling from a different number than the one on the account, so ask for "
+                    "their last name and ZIP code as well as the account's phone number."
+                )
+            if not (last_name or zip_code):
+                raise ActionRefused("Ask for their last name or ZIP code to confirm the account.")
 
         if self.lookup_attempts >= self.MAX_LOOKUP_ATTEMPTS:
             raise ActionRefused(
@@ -706,7 +722,7 @@ class CallSession:
             raise ActionRefused("Not booked yet: " + "; ".join(problems) + ".")
 
         assert option and phone_e164 and zip5 and self.assessment
-        customer_id = self._customer_for_booking(
+        customer_id, created = self._customer_for_booking(
             first_name, last_name, phone_e164, address, zip5, option.county
         )
         appointment_id = self.scheduler.book(
@@ -721,6 +737,8 @@ class CallSession:
             notes=self._technician_notes(notes),
         )
         if appointment_id is None:
+            if created:
+                self.store.delete_customer_without_history(customer_id)
             self._slot_taken(option)
 
         self.booked.append(appointment_id)
@@ -764,17 +782,24 @@ class CallSession:
 
     def _customer_for_booking(
         self, first_name: str, last_name: str, phone: str, address: str, zip5: str, county: str
-    ) -> int:
+    ) -> tuple[int, bool]:
+        """The customer an appointment belongs to, and whether we just created them.
+
+        An unverified caller gets their own record even on a number we know: attaching
+        their visit to that account would show a stranger's booking to the account holder
+        and let them move it. The office sees the possible match and merges if it's real."""
         if self.customer:
-            return self.customer.id
-        # Unverified callers on a number we know get attached to that customer, but
-        # their record is left alone: we can't tell a spouse from a stranger here.
+            return self.customer.id, False
         existing = self.store.customers_by_phone(phone)
         if existing:
-            return existing[0].id
-        return self.store.add_customer(
-            first_name.strip(), last_name.strip(), phone, address.strip(), zip5, county
+            names = ", ".join(f"#{c.id} {c.full_name}" for c in existing)
+            self.note(f"unverified caller; phone matches existing customer {names}: office to confirm and merge")
+        customer_id = self.store.add_customer(
+            # A new number is simply a new customer; one that matches an account stays
+            # provisional, out of caller ID and lookups, until the office confirms it.
+            first_name.strip(), last_name.strip(), phone, address.strip(), zip5, county, confirmed=not existing
         )
+        return customer_id, True
 
     def change_appointment(self, appointment_id: int, option_id: str) -> str:
         self._refuse_if_emergency()

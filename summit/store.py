@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS customers (
     address     TEXT NOT NULL,
     zip         TEXT NOT NULL,
     county      TEXT NOT NULL,
+    -- 0: made from an unverified caller's booking. Not used for caller ID or lookups
+    -- until the office confirms it.
+    confirmed   INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS customers_phone ON customers (phone);
@@ -104,7 +107,10 @@ class Store:
         self.conn.executescript(SCHEMA)
 
     def _migrate(self) -> None:
-        """Databases made before 'on_hold' existed reject it; rebuild the table with the new CHECK."""
+        columns = [r[1] for r in self.conn.execute("PRAGMA table_info(customers)")]
+        if columns and "confirmed" not in columns:
+            self.conn.execute("ALTER TABLE customers ADD COLUMN confirmed INTEGER NOT NULL DEFAULT 1")
+        # Databases made before 'on_hold' existed reject it; rebuild the table with the new CHECK.
         row = self.conn.execute("SELECT sql FROM sqlite_master WHERE name = 'appointments'").fetchone()
         if row is None or "on_hold" in row[0]:
             return
@@ -139,14 +145,31 @@ class Store:
     # Customers
 
     def add_customer(
-        self, first_name: str, last_name: str, phone: str, address: str, zip_code: str, county: str
+        self,
+        first_name: str,
+        last_name: str,
+        phone: str,
+        address: str,
+        zip_code: str,
+        county: str,
+        confirmed: bool = True,
     ) -> int:
         cur = self.conn.execute(
-            "INSERT INTO customers (first_name, last_name, phone, address, zip, county) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (first_name, last_name, phone, address, zip_code, county),
+            "INSERT INTO customers (first_name, last_name, phone, address, zip, county, confirmed) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (first_name, last_name, phone, address, zip_code, county, int(confirmed)),
         )
         return cur.lastrowid
+
+    def delete_customer_without_history(self, customer_id: int) -> None:
+        """Remove a customer created for a booking that then failed. Never one with any
+        appointment or membership."""
+        self.conn.execute(
+            "DELETE FROM customers WHERE id = ? "
+            "AND NOT EXISTS (SELECT 1 FROM appointments WHERE customer_id = customers.id) "
+            "AND NOT EXISTS (SELECT 1 FROM memberships WHERE customer_id = customers.id)",
+            (customer_id,),
+        )
 
     def set_membership(self, customer_id: int, status: Membership, expires_on: date) -> None:
         self.conn.execute(
@@ -161,7 +184,8 @@ class Store:
         return rows[0] if rows else None
 
     def customers_by_phone(self, phone: str) -> list[Customer]:
-        return self._customers("c.phone = ?", (phone,))
+        """Confirmed customers on this number: the ones caller ID and lookups may match."""
+        return self._customers("c.phone = ? AND c.confirmed = 1", (phone,))
 
     def _customers(self, where: str, params: tuple) -> list[Customer]:
         rows = self.conn.execute(
