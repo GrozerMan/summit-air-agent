@@ -37,6 +37,10 @@ def timezone(cfg: dict[str, Any]) -> ZoneInfo:
 
 
 def office_hours(cfg: dict[str, Any], day: date) -> tuple[time, time] | None:
+    """Opening and closing time, or None on a closed day (Sundays, holidays)."""
+    the_date = day.date() if isinstance(day, datetime) else day
+    if the_date.isoformat() in cfg["hours"].get("holidays", []):
+        return None
     hours = cfg["hours"][WEEKDAYS[day.weekday()]]
     if not hours:
         return None

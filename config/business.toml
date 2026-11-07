@@ -14,6 +14,12 @@ thu = ["07:00", "19:00"]
 fri = ["07:00", "19:00"]
 sat = ["08:00", "14:00"]
 sun = []
+# Closed like a Sunday: only urgent (P1) work goes out, and callbacks wait for the
+# next opening. Owner to confirm the list.
+holidays = [
+    "2026-11-26", "2026-12-25", "2027-01-01", "2027-05-31", "2027-07-05", "2027-09-06",
+    "2027-11-25", "2027-12-24", "2027-12-31",
+]
 
 [pricing]
 diagnostic = 129

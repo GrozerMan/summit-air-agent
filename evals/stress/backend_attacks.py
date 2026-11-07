@@ -470,7 +470,8 @@ def scheduling() -> None:
                hours <= 72, f"first P2 option {found[0].option_id} starts {hours:.0f}h out")
     else:
         call = new_call(store=store, call_id="p2full")
-        call.assess_situation(Facts(no_heat=True, indoor_temp_f=64, vulnerable_occupant=False, description="no heat"))
+        # No cooling, not no heat: no heat in November is P1 since the heating-season rule.
+        call.assess_situation(Facts(no_cooling=True, indoor_temp_f=80, vulnerable_occupant=False, description="AC out"))
         call.check_service_address(zip_code="11501", property_type="house")
         out = call.find_appointment_options()
         record("5 scheduling", "P2 with no capacity in 72h -> refused/escalated, not offered day 5+",
