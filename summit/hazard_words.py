@@ -22,6 +22,8 @@ the caller's time, and a missed gas leak can cost a house. The carve-outs are na
   said no".
 - HVAC words that only look like fire: the furnace "won't fire" or "fires up", a
   spark igniter, a smoke detector chirping.
+- Everyday words that only look like fire: "it's smoking hot in here", "my husband
+  smokes", cigarette smoke, "a fire going in the fireplace".
 """
 
 import re
@@ -278,6 +280,35 @@ def _burner_word(text: str, match: re.Match[str]) -> bool:
     return False
 
 
+# Smoke and fire words that aren't a fire in the house: "it's smoking hot in here" (a
+# heat wave, no AC), "my husband smokes", "cigarette smoke", "a fire in the fireplace".
+_PERSON_BEFORE = re.compile(
+    r"\b(?:i|he|she|they|we|you|he'?s|she'?s|they'?re|husband|wife|son|daughter|dad|father|mom|mother|"
+    r"roommate|tenant|neighbou?r|someone|somebody|guy|kids?)\s+(?:also\s+|still\s+|used\s+to\s+|is\s+|was\s+)?$",
+    re.I,
+)
+_TOBACCO = re.compile(r"\b(?:cigarettes?|cigars?|weed|pot|marijuana|vap\w*|hookah|tobacco|smokers?)\b", re.I)
+_HOT_AFTER = re.compile(r"\s*-?\s*hot\b", re.I)
+_FIREPLACE_AFTER = re.compile(
+    r"^(?:\W+\w+){0,5}?\W+(?:fireplace|fire\s*pit|firepit|wood\s*(?:burning\s+)?stove|chiminea)\b", re.I
+)
+
+
+def _not_a_house_fire(text: str, match: re.Match[str]) -> bool:
+    if _burner_word(text, match):
+        return True
+    word = match.group(0).lower()
+    after = text[match.end() :]
+    if word.startswith("smok"):
+        if _HOT_AFTER.match(after):
+            return True
+        clause = _clause_before(text, match.start()) + " " + _clause_after(text, match.end())
+        return bool(_TOBACCO.search(clause) or _PERSON_BEFORE.search(_clause_before(text, match.start())))
+    if word == "fire":
+        return bool(_FIREPLACE_AFTER.match(after))
+    return False
+
+
 def _co_symptoms(text: str) -> bool:
     kinds = set()
     for kind, pattern in _SYMPTOM_PATTERNS.items():
@@ -297,7 +328,7 @@ def hazard_in(text: str | None) -> str | None:
         return "gas"
     if _hits(_CO_PATTERNS, text) or _co_symptoms(text):
         return "co"
-    if _hits(_FIRE_PATTERNS, text, skip=_burner_word):
+    if _hits(_FIRE_PATTERNS, text, skip=_not_a_house_fire):
         return "fire"
     return None
 

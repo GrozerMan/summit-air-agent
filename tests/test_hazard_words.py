@@ -140,6 +140,12 @@ def test_co_mentions_that_are_not_an_alarm_or_symptoms(text):
         "there's a fire in the basement",
         "the outlet sparked",
         "the smoke alarm is going off",
+        # Still caught next to the everyday carve-outs below.
+        "I smell smoke",
+        "the furnace is smoking",
+        "it smells smoky in the basement",
+        "smoke coming from the fireplace into the room",
+        "there is a fire near the furnace",
     ],
 )
 def test_smoke_sparks_and_flames_are_caught(text):
@@ -165,6 +171,15 @@ def test_smoke_sparks_and_flames_are_caught(text):
         "No sparks, no smoke, nothing like that",
         "I haven't seen any smoke",
         "caller denies smoke or sparks",
+        # Everyday words that only look like fire. "Smoking hot" on a no-AC call made
+        # the call a permanent P0 and read the evacuation script to someone who was hot.
+        "the AC is out and it's smoking hot in here",
+        "it's smoking-hot upstairs",
+        "my husband smokes, could that be the smell",
+        "I smoke but never inside",
+        "smells like cigarette smoke in the vents",
+        "there was a fire in the fireplace and now the heat stopped",
+        "we had a fire going in the wood stove",
     ],
 )
 def test_hvac_fire_words_and_denials_do_not_fire(text):
