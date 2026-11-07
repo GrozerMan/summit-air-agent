@@ -130,6 +130,7 @@ async function openCall(id) {
     <div class="muted">${time(c.started_at)} · ${esc(c.outcome || "in progress")}</div>
     <p>${esc(c.summary)}</p>
     ${r.reasons && r.reasons.length ? `<p><strong>Why:</strong> ${esc(r.reasons.join(", "))}</p>` : ""}
+    ${r.metrics && r.metrics.turns_measured ? `<p class="muted"><strong>Response time:</strong> ${esc(r.metrics.latency_p50_s)}s typical, ${esc(r.metrics.latency_p95_s)}s slowest 5% (${esc(r.metrics.turns_measured)} turns) · ${esc(r.metrics.stt_audio_seconds)}s of caller audio · ${esc(r.metrics.llm_prompt_tokens + r.metrics.llm_completion_tokens)} model tokens</p>` : ""}
     <h4>Transcript</h4>${transcript || '<div class="muted">No transcript yet.</div>'}
     <h4>Tool calls</h4>${tools || '<div class="muted">None.</div>'}`;
   detail.classList.add("open");
