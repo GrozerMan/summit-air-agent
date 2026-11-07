@@ -165,6 +165,8 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
 
         if self.building_system and (check.in_area or self.area):
             self._set_outcome_unless_decided("building_system")
+            if not any(n.startswith("heat comes from the building") for n in self.notes):
+                self.note("heat comes from the building: referred to landlord/super")
             nyc = self.area and self.area.county in _NYC_COUNTIES
             report = " In New York City they can also call 311 to report no heat." if nyc else ""
             return (
@@ -594,6 +596,7 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
             raise ActionRefused("Say what the callback is about (reason).")
 
         due = self._add_callback(number, reason.strip(), urgent=urgent, name=name)
+        self.note(f"{'urgent ' if urgent else ''}callback requested: {reason.strip()[:120]}")
         if urgent:
             self.notifier.alert(self.call_id, "urgent", f"Urgent callback for {say_phone(number)}: {reason}")
         if self.outcome is None:

@@ -108,6 +108,8 @@ class RecordsMixin:
             parts.append(f"Caller {say_phone(self.caller_id)} (not verified).")
         if self.notes:
             parts.append("Notes: " + "; ".join(self.notes) + ".")
+        if not parts and self.outcome:
+            parts.append(f"Outcome: {self.outcome.replace('_', ' ')}.")
         return " ".join(parts)
 
     def _technician_notes(

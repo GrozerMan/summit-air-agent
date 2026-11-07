@@ -760,3 +760,15 @@ def test_a_house_number_read_back_in_words_counts(make_call):
         "That's six three one, five fifty-five, oh one two three, at nine Birch Court, Huntington?"
     )
     assert call.book_appointment(option, **GOOD_BOOKING).startswith("Booked")
+
+
+def test_a_callback_only_call_still_leaves_a_summary(make_call):
+    call = make_call(None)
+    call.request_callback(phone="516-555-0177", reason="new AC quote")
+    assert "new AC quote" in call.technician_summary()
+
+
+def test_a_building_heat_call_leaves_a_summary(make_call):
+    call = make_call(None)
+    call.check_service_address(zip_code="11215", property_type="apartment", heat_from_building=True)
+    assert "landlord" in call.technician_summary()
