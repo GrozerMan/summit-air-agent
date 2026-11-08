@@ -95,6 +95,13 @@ CREATE TABLE IF NOT EXISTS callbacks (
     status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Sales follow-ups the owner's board derives from calls; only their done status is stored.
+CREATE TABLE IF NOT EXISTS followups (
+    key         TEXT PRIMARY KEY,  -- "<call id>:<kind>"
+    status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -200,7 +207,15 @@ class Store:
 
     def drop_all(self) -> None:
         """Delete every table, for `seed --reset` on Postgres. Irreversible."""
-        for table in ("callbacks", "alerts", "calls", "appointments", "memberships", "customers"):
+        for table in (
+            "followups",
+            "callbacks",
+            "alerts",
+            "calls",
+            "appointments",
+            "memberships",
+            "customers",
+        ):
             self.conn.execute(f"DROP TABLE IF EXISTS {table}")
 
     @contextmanager
@@ -464,6 +479,58 @@ class Store:
             "SELECT * FROM callbacks WHERE call_id = ? ORDER BY id", (call_id,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # Reads for the owner's views (summit/insights.py)
+
+    def calls_since(self, cutoff: datetime | None = None) -> list[dict[str, Any]]:
+        """Calls started at or after `cutoff` (all calls if None), newest first, with the
+        record parsed and without transcripts. Compared as datetimes, not strings."""
+        rows = self.conn.execute(
+            "SELECT id, caller_id, started_at, ended_at, priority, outcome, summary, record FROM calls"
+        ).fetchall()
+        calls = [
+            {**dict(r), "record": json.loads(r["record"])}
+            for r in rows
+            if cutoff is None or datetime.fromisoformat(r["started_at"]) >= cutoff
+        ]
+        return sorted(calls, key=lambda c: datetime.fromisoformat(c["started_at"]), reverse=True)
+
+    def appointments_from_calls(self) -> list[dict[str, Any]]:
+        """Every appointment a call made, any status."""
+        rows = self.conn.execute(
+            "SELECT * FROM appointments WHERE call_id IS NOT NULL ORDER BY id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def appointments_on(self, day: date) -> list[dict[str, Any]]:
+        """The day's live jobs (booked or held), in arrival order."""
+        rows = self.conn.execute(
+            "SELECT * FROM appointments WHERE day = ? AND status IN ('booked', 'on_hold') "
+            "ORDER BY arrival_window, county",
+            (day.isoformat(),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def open_callbacks(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM callbacks WHERE status = 'open' ORDER BY urgent DESC, due_at"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def unacknowledged_alerts(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute("SELECT * FROM alerts WHERE acknowledged = 0 ORDER BY id DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def followups_done(self) -> set[str]:
+        rows = self.conn.execute("SELECT key FROM followups WHERE status = 'done'").fetchall()
+        return {r["key"] for r in rows}
+
+    def mark_followup_done(self, key: str) -> None:
+        self.conn.execute(
+            "INSERT INTO followups (key, status) VALUES (?, 'done') "
+            "ON CONFLICT (key) DO UPDATE SET status = 'done', updated_at = excluded.updated_at",
+            (key,),
+        )
 
     def appointments_for_call(self, call_id: str) -> list[dict[str, Any]]:
         rows = self.conn.execute(

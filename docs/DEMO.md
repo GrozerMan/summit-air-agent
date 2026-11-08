@@ -18,12 +18,16 @@ every transcript. Open the meeting with what happened on their calls, good and b
 ## Right before
 
 ```bash
-uv run python -m summit.seed --reset --member-phone +1YOURCELL --member-name "Your Name"
+uv run python -m summit.seed --reset --sample-week --member-phone +1YOURCELL --member-name "Your Name"
 bash scripts/run_local.sh                     # terminal 1
 uv run python -m dashboard.server             # terminal 2, http://localhost:8765
 ```
 
 Call the number once from your cell: you should be greeted by name.
+
+`--sample-week` adds a labelled past week of calls so the owner's tabs (Results,
+Follow-ups, Morning brief) aren't empty; the dashboard says "includes sample data"
+while any is there. Leave it out for a clean board.
 
 ## Script
 
@@ -48,6 +52,19 @@ Each call shows something different. Keep the dashboard on screen.
 
 Open a call on the dashboard to show the transcript, the reasons behind its
 priority, response times, and every tool call with its result.
+
+6. **Show the owner the money.** Switch tabs on the dashboard:
+   - **Results:** calls answered and how many came while the office was closed, jobs
+     booked, estimated revenue (and how much of it after hours), the replacement
+     pipeline, emergencies handled, response time, cost per call against an
+     answering service, and "wrong promises: 0". The calls you just made are in it.
+     Every dollar figure is an estimate from `[insights]` in the TOML, shown on the page.
+   - **Follow-ups:** money on the table. Old systems worth a replacement estimate,
+     a lapsed member to renew, non-members to offer the club, a commercial lead,
+     callers who didn't book, and where out-of-area demand comes from. "Done" clears one.
+   - **Morning brief:** since the office closed, today's jobs with equipment and
+     access notes, callbacks due, top follow-ups. Printable, and
+     `uv run python -m summit.brief --slack` sends it to Slack (cron it for 7am).
 
 ## If something breaks
 

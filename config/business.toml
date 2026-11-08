@@ -231,3 +231,20 @@ callback_hours = 2
 [silence]
 check_in_seconds = 12
 max_check_ins = 2
+
+[insights]
+# For the owner's results board and follow-ups. These are ESTIMATES, not prices: the
+# board labels them as such and shows them. Edit to match your own books.
+# Average revenue from a repair visit (no heat, no cooling, leaks...). Conservative:
+# consumer guides put the US average repair near $350, Housecall Pro's 2025 revenue per
+# repair job is about $1,200.
+repair_visit_value = 450
+tune_up_value = 159
+# Average installed replacement system. Counted as pipeline, never as captured revenue.
+replacement_value = 9000
+# A system at least this old gets flagged as a replacement-estimate opportunity.
+replacement_age_years = 15
+# What a minute of the agent costs (LiveKit agent session + phone line + speech + model),
+# approximate, and what a human answering service charges per minute, for comparison.
+agent_cost_per_minute = 0.07
+answering_service_per_minute = 1.50

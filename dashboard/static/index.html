@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Summit Air · Dispatch</title>
+<title>Summit Air · Office</title>
 <style>
   :root {
     --bg: #f6f7f9; --panel: #fff; --ink: #1c2330; --muted: #6b7484; --line: #e3e6eb;
@@ -43,19 +43,74 @@
   .turn { margin: 6px 0; }
   .turn b { display: inline-block; width: 70px; color: var(--muted); font-weight: 500; }
   .turn.tool { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
-  @media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 12px; } }
+  nav.tabs { display: flex; gap: 4px; margin-left: 20px; flex-wrap: wrap; }
+  nav.tabs button { border: 0; background: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; color: var(--muted); }
+  nav.tabs button.on { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-weight: 600; }
+  .view { display: none; } .view.on { display: grid; }
+  .banner { grid-column: 1 / -1; padding: 8px 14px; border-radius: 8px; background: color-mix(in srgb, var(--p2) 14%, var(--panel)); border: 1px solid color-mix(in srgb, var(--p2) 40%, transparent); font-size: 13px; }
+  .toolbar { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; }
+  .toolbar button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .tiles { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .tile .label { color: var(--muted); font-size: 12px; }
+  .tile .value { font-size: 28px; font-weight: 600; margin: 2px 0; font-variant-numeric: tabular-nums; }
+  .tile.hero .value { font-size: 34px; }
+  .tile .sub { color: var(--muted); font-size: 12px; }
+  .bars { padding: 10px 14px; }
+  .bar-row { display: grid; grid-template-columns: 180px 1fr 36px; gap: 10px; align-items: center; padding: 4px 0; }
+  .bar-track { height: 10px; }
+  .bar { height: 10px; background: var(--accent); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .bar-row .n { text-align: right; font-variant-numeric: tabular-nums; }
+  .foot { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+  .nowrap { white-space: nowrap; }
+  .money { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .kind { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); white-space: nowrap; }
+  #brief { grid-column: 1 / -1; max-width: 860px; }
+  #brief section { margin-bottom: 14px; }
+  #brief .lead { padding: 12px 14px; font-size: 15px; }
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; padding: 12px; }
+    header { flex-wrap: wrap; padding: 12px; } nav.tabs { margin-left: 0; }
+    .bar-row { grid-template-columns: 120px 1fr 30px; }
+    table { display: block; overflow-x: auto; }
+  }
+  @media print {
+    header nav, header .updated, .toolbar, button { display: none !important; }
+    body { background: #fff; color: #000; } main { display: none !important; } #view-brief { display: block !important; }
+    section { border-color: #ccc; break-inside: avoid; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>Summit Air dispatch</h1>
+  <h1>Summit Air</h1>
+  <nav class="tabs" id="tabs">
+    <button data-view="dispatch" class="on">Dispatch</button>
+    <button data-view="results">Results</button>
+    <button data-view="followups">Follow-ups</button>
+    <button data-view="brief">Morning brief</button>
+  </nav>
   <span class="updated" id="updated"></span>
 </header>
-<main>
+<main class="view on" id="view-dispatch">
   <section><h2>Alerts</h2><div id="alerts"></div></section>
   <section><h2>Callbacks due</h2><div id="callbacks"></div></section>
   <section class="wide"><h2>Calls</h2><div id="calls"></div></section>
   <section class="wide"><h2>Booked appointments</h2><div id="appointments"></div></section>
+</main>
+<main class="view" id="view-results">
+  <div class="toolbar">Showing
+    <button data-days="1">Today</button><button data-days="7" class="on">Last 7 days</button><button data-days="0">All time</button>
+  </div>
+  <div id="results" style="display: contents"></div>
+</main>
+<main class="view" id="view-followups">
+  <div id="followups" style="display: contents"></div>
+</main>
+<main class="view" id="view-brief">
+  <div class="toolbar"><button onclick="window.print()">Print</button>
+    <span class="muted">Also: <code>uv run python -m summit.brief --slack</code> sends this to Slack, e.g. every morning at 7.</span></div>
+  <div id="brief"></div>
 </main>
 <aside id="detail"></aside>
 
@@ -139,8 +194,102 @@ async function openCall(id) {
 function closeCall() { document.getElementById("detail").classList.remove("open"); }
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeCall(); });
 
+
+// ---- Owner views ----
+let view = "dispatch", days = 7;
+const money = n => n === null || n === undefined ? "–" : "$" + Math.round(n).toLocaleString();
+const num = n => n === null || n === undefined ? "–" : n.toLocaleString();
+const sampleBanner = on => on ? `<div class="banner"><strong>Includes sample data.</strong> A labelled sample week (seeded for the demo) is mixed in with real calls. <code>summit.seed --reset</code> removes it.</div>` : "";
+const tile = (label, value, sub, hero) => `<div class="tile${hero ? " hero" : ""}"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub || ""}</div></div>`;
+
+function renderResults(r) {
+  const a = r.assumptions;
+  const outcomes = Object.entries(r.outcomes);
+  const max = Math.max(1, ...outcomes.map(([, n]) => n));
+  const bars = outcomes.map(([k, n]) => `<div class="bar-row" title="${esc(k)}: ${n} call${n === 1 ? "" : "s"}">
+      <div>${esc(k)}</div><div class="bar-track"><div class="bar" style="width:${100 * n / max}%"></div></div><div class="n">${n}</div></div>`).join("");
+  return sampleBanner(r.sample) + `
+    <div class="tiles">
+      ${tile("Calls answered", num(r.calls), `<strong>${num(r.after_hours_calls)}</strong> while the office was closed`, true)}
+      ${tile("Jobs booked", num(r.jobs_booked), `${num(r.jobs_after_hours)} booked after hours · ${r.booking_rate === null ? "–" : Math.round(100 * r.booking_rate) + "%"} of calls`, true)}
+      ${tile("Revenue booked (estimate)", money(r.revenue_estimate), `${money(r.revenue_after_hours)} of it after hours`, true)}
+      ${tile("Replacement pipeline (estimate)", money(r.pipeline_estimate), `${num(r.replacement_leads)} old systems or estimate requests`, true)}
+    </div>
+    <div class="tiles">
+      ${tile("Safety emergencies handled", num(r.emergencies), "Safety script read word for word, dispatcher alerted")}
+      ${tile("Urgent same-day", num(r.urgent), "No heat in season, vulnerable people at home")}
+      ${tile("Members recognized", num(r.members_recognized), "Greeted by name, member pricing and priority")}
+      ${tile("Typical response time", r.latency_p50_s === null ? "–" : r.latency_p50_s + "s", "From the caller finishing to the agent speaking")}
+      ${tile("Cost per call (estimate)", r.agent_cost_per_call === null ? "–" : "$" + r.agent_cost_per_call.toFixed(2), r.answering_service_per_call === null ? "" : `vs about $${r.answering_service_per_call.toFixed(2)} at an answering service · ${r.avg_minutes} min average`)}
+      ${tile("Wrong promises", num(r.false_claims), r.false_claims ? "Flagged to the office at hang-up" : "Times the agent claimed a booking or callback it didn't make")}
+    </div>
+    <section class="wide"><h2>What happened on each call</h2>${outcomes.length ? `<div class="bars">${bars}</div>` : `<div class="empty">No calls in this period.</div>`}</section>
+    <div class="foot">Estimates use the values in <code>config/business.toml [insights]</code>: repair visit ${money(a.repair_visit_value)}, tune-up ${money(a.tune_up_value)}, replacement system ${money(a.replacement_value)} (pipeline, not booked revenue), agent $${a.agent_cost_per_minute.toFixed(2)}/min, answering service $${a.answering_service_per_minute.toFixed(2)}/min. Edit them to match your books.</div>`;
+}
+
+function renderFollowups(f) {
+  const items = f.items;
+  const total = items.reduce((t, o) => t + (o.value || 0), 0);
+  const rows = items.map(o => `<tr>
+      <td><span class="kind">${esc(o.label)}</span><div class="muted">${time(o.at)}</div></td>
+      <td>${esc(o.who)}<div class="muted">${esc(phone(o.phone))}</div></td>
+      <td>${esc(o.why)}<div class="muted">${esc(o.action)}</div></td>
+      <td class="money">${o.value ? money(o.value) : ""}</td>
+      <td><button onclick="openCall('${o.call_id}')">Call</button> <button onclick="post('/api/followups/${encodeURIComponent(o.key)}/done')">Done</button></td></tr>`).join("");
+  const outside = f.outside.length ? `<section class="wide"><h2>Callers outside the area, last 30 days</h2><table><tr><th>Where</th><th>Calls</th></tr>` +
+    f.outside.map(o => `<tr><td>${esc(o.place)}</td><td>${o.calls}</td></tr>`).join("") + `</table><div class="foot" style="padding:8px 14px">Where demand is coming from that you don't serve yet.</div></section>` : "";
+  const sample = items.some(o => o.call_id.startsWith("sample-"));
+  return sampleBanner(sample) + `
+    <section class="wide"><h2>Money on the table · ${items.length} open · ${money(total)} estimated</h2>
+      ${items.length ? `<table><tr><th>Type</th><th>Who</th><th>Why, and what to do</th><th>Worth (est.)</th><th></th></tr>${rows}</table>` : `<div class="empty">Nothing to follow up. Every lead is handled.</div>`}
+    </section>${outside}`;
+}
+
+function renderBrief(b) {
+  const o = b.overnight;
+  const calls = o.list.map(c => `<tr class="clickable" onclick="openCall('${c.id}')"><td class="nowrap">${time(c.at)}</td><td>${badge(c.priority)}</td><td>${esc(c.outcome)}</td><td>${esc(c.summary)}</td></tr>`).join("");
+  const jobs = b.jobs.map(j => `<tr><td class="nowrap">${esc(j.arrival_window)}</td><td>${badge(j.priority)}</td><td>${esc(j.area)}</td>
+      <td>${esc(j.job_type)}<div class="muted">${esc(j.contact_name)} · ${esc(phone(j.contact_phone))}</div></td>
+      <td>${esc(j.service_address)}${j.equipment ? `<div class="muted">Equipment: ${esc(j.equipment)}</div>` : ""}${j.access ? `<div class="muted">Access: ${esc(j.access)}</div>` : ""}</td></tr>`).join("");
+  const since = new Date(b.since).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"});
+  return sampleBanner(b.sample) + `
+    <section><div class="lead"><strong>${new Date(b.date + "T12:00").toLocaleDateString([], {weekday: "long", month: "long", day: "numeric"})}.</strong>
+      Since the office closed (${esc(since)}): <strong>${o.calls}</strong> calls, <strong>${o.booked}</strong> booked, <strong>${o.emergencies}</strong> safety emergencies, <strong>${o.callbacks}</strong> callbacks set.</div></section>
+    ${b.alerts.length ? `<section><h2>Alerts not yet acknowledged</h2>${renderAlerts(b.alerts)}</section>` : ""}
+    <section><h2>Overnight calls</h2>${calls ? `<table>${calls}</table>` : `<div class="empty">No calls since the office closed.</div>`}</section>
+    <section><h2>Today's jobs</h2>${jobs ? `<table><tr><th>Window</th><th></th><th>Area</th><th>Job</th><th>Address and notes</th></tr>${jobs}</table>` : `<div class="empty">No jobs booked for today.</div>`}</section>
+    <section><h2>Callbacks due today</h2>${renderCallbacks(b.callbacks)}</section>
+    <section><h2>Top follow-ups</h2>${b.followups.length ? `<table>${b.followups.map(f => `<tr><td><span class="kind">${esc(f.label)}</span></td><td>${esc(f.who)}<div class="muted">${esc(phone(f.phone))}</div></td><td>${esc(f.why)}</td></tr>`).join("")}</table>` : `<div class="empty">None.</div>`}</section>`;
+}
+
+async function refreshOwner() {
+  if (view === "results") document.getElementById("results").innerHTML = renderResults(await get(`/api/results?days=${days}`));
+  if (view === "followups") document.getElementById("followups").innerHTML = renderFollowups(await get("/api/followups"));
+  if (view === "brief") document.getElementById("brief").innerHTML = renderBrief(await get("/api/brief"));
+}
+
+function show(name) {
+  view = name;
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.view === name));
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === "view-" + name));
+  try { localStorage.setItem("summit-view", name); } catch (e) {}
+  history.replaceState(null, "", "#" + name);
+  refresh();
+}
+document.querySelectorAll("#tabs button").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
+document.querySelectorAll("[data-days]").forEach(b => b.addEventListener("click", () => {
+  days = Number(b.dataset.days);
+  document.querySelectorAll("[data-days]").forEach(x => x.classList.toggle("on", x === b));
+  refresh();
+}));
+
 async function refresh() {
   try {
+    if (view !== "dispatch") {
+      await refreshOwner();
+      document.getElementById("updated").textContent = "Updated " + new Date().toLocaleTimeString();
+      return;
+    }
     const [alerts, callbacks, calls, appts] = await Promise.all(
       ["alerts", "callbacks", "calls", "appointments"].map(k => get(`/api/${k}`)));
     document.getElementById("alerts").innerHTML = renderAlerts(alerts);
@@ -153,7 +302,9 @@ async function refresh() {
   }
 }
 
-refresh();
+let saved = location.hash.slice(1);
+if (!saved) try { saved = localStorage.getItem("summit-view") || "dispatch"; } catch (e) {}
+show(["dispatch", "results", "followups", "brief"].includes(saved) ? saved : "dispatch");
 setInterval(refresh, 2000);
 </script>
 </body>

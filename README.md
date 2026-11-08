@@ -25,7 +25,7 @@ Caller ── PSTN ──> LiveKit phone number ──> LiveKit Agents worker (a
                                       ├─ backend.py       per-call state + guardrails
                                       └─ store.py         SQLite locally, Postgres deployed
                                               ▼
-                       dashboard (calls, alerts, callbacks, bookings)  +  optional Slack alerts
+           dashboard: dispatch board + owner views (insights.py)  +  optional Slack alerts
 ```
 
 More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · why things are the way they are:
@@ -54,6 +54,13 @@ separate OpenAI, Deepgram or Cartesia keys) and a US phone number.
 | Voice, laptop mic | `uv run python agent.py console` |
 | Real phone call | `uv run python agent.py dev`, then dial your LiveKit number (see below) |
 | Watch calls live | `uv run python -m dashboard.server` → http://localhost:8765 |
+| Owner's morning brief | `uv run python -m summit.brief` (add `--slack` to post it) |
+
+The dashboard has four tabs: **Dispatch** (alerts, callbacks, calls, upcoming
+bookings), and for the owner **Results** (calls answered, after hours, jobs and estimated
+revenue, emergencies, response time, cost per call), **Follow-ups** (replacement
+leads, renewals, commercial leads, callers who didn't book) and **Morning brief**.
+`summit.seed --sample-week` adds a labelled sample week so those aren't empty in a demo.
 
 Console mode has no caller ID. Set `DEMO_CALLER_ID=+1YOURCELL` in `.env.local` to be
 greeted as the seeded member.
@@ -111,7 +118,8 @@ paths, verify with the account's phone number, last name and ZIP.
 ## Changing the business rules
 
 Prices, hours, holidays, gas utility numbers, triage thresholds and the heating
-season, capacity, callback timing and the transfer number all live in
+season, capacity, callback timing, the transfer number and the owner board's revenue
+and cost estimates (`[insights]`) all live in
 [`config/business.toml`](config/business.toml). Served ZIPs are in
 [`config/service_area.csv`](config/service_area.csv), generated from GeoNames by
 [`scripts/build_service_area.py`](scripts/build_service_area.py) for the counties listed in the TOML. The prompt is

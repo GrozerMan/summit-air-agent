@@ -26,8 +26,13 @@ class Notifier:
             threading.Thread(target=_post_slack, args=(self.slack_webhook_url, text), daemon=True).start()
         return alert_id
 
+    def send(self, text: str) -> bool:
+        """Post a message (the morning brief) to Slack, waiting for it. False if no webhook
+        is set or the post failed."""
+        return bool(self.slack_webhook_url) and _post_slack(self.slack_webhook_url, text)
 
-def _post_slack(url: str, text: str) -> None:
+
+def _post_slack(url: str, text: str) -> bool:
     request = urllib.request.Request(
         url,
         data=json.dumps({"text": text}).encode(),
@@ -35,5 +40,7 @@ def _post_slack(url: str, text: str) -> None:
     )
     try:
         urllib.request.urlopen(request, timeout=3).close()
+        return True
     except Exception:
-        logger.warning("couldn't post alert to Slack", exc_info=True)
+        logger.warning("couldn't post to Slack", exc_info=True)
+        return False
