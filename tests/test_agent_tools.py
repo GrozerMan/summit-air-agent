@@ -79,7 +79,7 @@ async def test_booking_confirmation_is_spoken_without_the_model(make_call):
     agent = SummitAgent(call)
     call.assess_situation(Facts(request_type="tune_up", description="tune-up"))
     call.check_service_address(zip_code="11706", property_type="house")
-    call.find_appointment_options()
+    call.find_appointment_options(caller_says_member=False)
     option_id = next(iter(call.offered))
     call.agent_said = "That's 631-555-0155, at 33 Shore Road, Bay Shore. Is that right?"
     result = await agent.book_appointment(
@@ -93,3 +93,21 @@ async def test_booking_confirmation_is_spoken_without_the_model(make_call):
     ctx.insert(llm.FunctionCallOutput(call_id="c1", name="book_appointment", output=result, is_error=False))
     said = "".join([chunk async for chunk in agent.llm_node(ctx, [], ModelSettings())])
     assert said.startswith("You're booked.") and "33 Shore Road, Bay Shore" in said and "$159" in said
+
+
+async def test_a_hazard_only_the_model_reported_is_still_spoken_as_fixed_text(make_call):
+    # Review finding 8: the word screen misses "a weird odor", the model reports gas_smell=true.
+    # The turn after that tool call must be the fixed script, not the model's rewording of it.
+    from livekit.agents import ModelSettings, llm
+
+    from summit.triage import Facts
+
+    call = make_call(None)
+    agent = SummitAgent(call)
+    result = call.assess_situation(Facts(gas_smell=True, description="a weird odor by the furnace"))
+    ctx = llm.ChatContext()
+    ctx.add_message(role="user", content="There's a weird odor by the furnace.")
+    ctx.insert(llm.FunctionCall(call_id="c1", name="assess_situation", arguments="{}"))
+    ctx.insert(llm.FunctionCallOutput(call_id="c1", name="assess_situation", output=result, is_error=False))
+    said = "".join([chunk async for chunk in agent.llm_node(ctx, [], ModelSettings())])
+    assert said == call.safety_script()

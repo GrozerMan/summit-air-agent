@@ -105,8 +105,8 @@ class TriageMixin:
         # Times offered before the hazard came up are void.
         self._void_offers()
         return (
-            f"SAFETY EMERGENCY ({what}). The dispatcher has been alerted. "
-            f'Read this to the caller word for word: "{script}" '
+            f"SAFETY EMERGENCY ({what}). The dispatcher has been alerted. The safety script is being read to "
+            f'the caller word for word right now, so don\'t repeat it: "{script}" '
             "Then stop. Don't collect booking details, and if they want to hang up and leave, let them."
         )
 
@@ -168,6 +168,15 @@ class TriageMixin:
 
     # The caller's own words
 
+    def unsaid_safety_script(self, said_so_far: str) -> str | None:
+        """The safety script, if the call is P0 and it hasn't been spoken yet. Checked before every
+        reply: after a caller's turn (the word screen) and after a tool call (a hazard only the
+        model reported), so the script is always fixed text, never the model's rewording."""
+        if self.priority != Priority.P0:
+            return None
+        script = self.safety_script()
+        return None if _squash(script) in _squash(said_so_far) else script
+
     def screen_caller_turn(self, text: str, said_so_far: str = "") -> str | None:
         """Runs on each caller turn before the model answers it. Returns fixed words
         to say instead of a model reply, or None to let the model answer.
@@ -187,8 +196,8 @@ class TriageMixin:
         if self.priority != Priority.P0:
             return None
 
-        script = self.safety_script()
-        if _squash(script) not in _squash(said_so_far):
+        script = self.unsaid_safety_script(said_so_far)
+        if script:
             return script
         if cannot_leave(text):
             assert self.assessment

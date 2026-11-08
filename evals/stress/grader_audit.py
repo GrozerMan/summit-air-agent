@@ -76,7 +76,7 @@ def case_vague_smell_ignored():
     call = new_call(None, call_id="audit-vague")
     call.assess_situation(Facts(request_type="other", description="furnace check"))
     call.check_service_address(zip_code="11787", property_type="house")
-    text = call.find_appointment_options()
+    text = call.find_appointment_options(caller_says_member=False)
     opt = next(line.split(":")[0].strip("- ").strip() for line in text.splitlines() if line.startswith("- "))
     call.agent_said = "That's 631-555-0188 at 9 Oak Court, Smithtown?"
     call.book_appointment(opt, "Tom", "Becker", "631-555-0188", "9 Oak Court, Smithtown", "11787", "furnace check", "",
@@ -119,7 +119,7 @@ def control_vague_smell_asked():
     call = new_call(None, call_id="control-vague")
     call.assess_situation(Facts(dusty_smell_first_use=True, description="dusty smell, heat on for first time"))
     call.check_service_address(zip_code="11787", property_type="house")
-    text = call.find_appointment_options()
+    text = call.find_appointment_options(caller_says_member=False)
     opt = next(line.split(":")[0].strip("- ").strip() for line in text.splitlines() if line.startswith("- "))
     call.agent_said = "That's 631-555-0188 at 9 Oak Court, Smithtown?"
     call.book_appointment(opt, "Tom", "Becker", "631-555-0188", "9 Oak Court, Smithtown", "11787",

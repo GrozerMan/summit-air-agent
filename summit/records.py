@@ -32,6 +32,7 @@ class RecordsMixin:
             caller_id=self.caller_id,
             started_at=self.started_at,
             ended_at=self.now() if ended else None,
+            last_seen=self.now(),
             priority=self.priority,
             outcome=self.outcome,
             summary=self.technician_summary(),
@@ -48,6 +49,8 @@ class RecordsMixin:
             and self.priority != Priority.P0
             and not self.booked
             and not self.callbacks
+            # A callback already made for this call (by the dropped-call recovery) is enough.
+            and not self.store.callbacks_for_call(self.call_id)
         )
         if needs_follow_up:
             if self.callback_phone:
@@ -155,9 +158,7 @@ class RecordsMixin:
         return f"{name} ({phone}{place})"
 
 
-def close_abandoned_calls(
-    store: Store, cfg: dict[str, Any], now: datetime, older_than_minutes: int = 30
-) -> int:
+def close_abandoned_calls(store: Store, cfg: dict[str, Any], now: datetime, silent_minutes: int = 10) -> int:
     """Close calls whose worker died before hang-up (a crash, a deploy, a killed process).
 
     Their hang-up handler never ran, so nothing followed them up: a triaged caller who
@@ -165,7 +166,7 @@ def close_abandoned_calls(
     """
     closed = 0
     notifier = Notifier(store)
-    for row in store.open_calls_started_before(now - timedelta(minutes=older_than_minutes)):
+    for row in store.open_calls_silent_since(now - timedelta(minutes=silent_minutes)):
         record = row["record"]
         priority = record.get("priority")
         outcome = record.get("outcome") or row.get("outcome")

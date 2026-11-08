@@ -63,7 +63,7 @@ def refused(fn, *a, **kw) -> tuple[bool, str]:
 
 
 def first_option(call: CallSession) -> str:
-    text = call.find_appointment_options()
+    text = call.find_appointment_options(caller_says_member=False)
     # The read-back the agent would say before booking; the backend now checks it was said (H5).
     # Probes that test a missing read-back clear this afterwards.
     call.agent_said += (
@@ -441,7 +441,7 @@ def scheduling() -> None:
     call = new_call()
     call.assess_situation(Facts(request_type="tune_up", description="tune-up"))
     call.check_service_address(zip_code="11706", property_type="house")
-    call.find_appointment_options()
+    call.find_appointment_options(caller_says_member=False)
     late = max(call.offered.values(), key=lambda o: (o.day, o.window))
     call.assess_situation(Facts(no_heat=True, indoor_temp_f=52, vulnerable_occupant=True,
                                 description="actually the heat is out now, 52 inside, my mom is 90"))
@@ -473,7 +473,7 @@ def scheduling() -> None:
         # No cooling, not no heat: no heat in November is P1 since the heating-season rule.
         call.assess_situation(Facts(no_cooling=True, indoor_temp_f=80, vulnerable_occupant=False, description="AC out"))
         call.check_service_address(zip_code="11501", property_type="house")
-        out = call.find_appointment_options()
+        out = call.find_appointment_options(caller_says_member=False)
         record("5 scheduling", "P2 with no capacity in 72h -> refused/escalated, not offered day 5+",
                "dispatcher has been alerted" in out, f"no P2 option within 72h; find_appointment_options -> {out[:120]!r}")
 

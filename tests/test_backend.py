@@ -29,7 +29,7 @@ def read_back(call, phone=GOOD_BOOKING["phone"], address=GOOD_BOOKING["address"]
 def ready_to_book(call, facts=None, zip_code="11743"):
     call.assess_situation(facts or Facts(no_heat=True, indoor_temp_f=64, vulnerable_occupant=False))
     call.check_service_address(zip_code=zip_code, property_type="house")
-    call.find_appointment_options()
+    call.find_appointment_options(caller_says_member=False)
     read_back(call)
     return next(iter(call.offered))
 
@@ -175,7 +175,7 @@ def test_no_options_before_triage(make_call):
     call = make_call(None)
     call.check_service_address(zip_code="11743", property_type="house")
     with pytest.raises(ActionRefused, match="assess_situation"):
-        call.find_appointment_options()
+        call.find_appointment_options(caller_says_member=False)
 
 
 def test_no_options_on_p0(make_call):
@@ -183,7 +183,7 @@ def test_no_options_on_p0(make_call):
     call.check_service_address(zip_code="11743", property_type="house")
     call.assess_situation(Facts(co_alarm_or_symptoms=True))
     with pytest.raises(ActionRefused, match="safety emergency"):
-        call.find_appointment_options()
+        call.find_appointment_options(caller_says_member=False)
 
 
 def test_no_options_out_of_area(make_call):
@@ -191,7 +191,7 @@ def test_no_options_out_of_area(make_call):
     call.assess_situation(Facts(request_type="tune_up"))
     call.check_service_address(zip_code="07030", property_type="house")  # Hoboken NJ
     with pytest.raises(ActionRefused, match="service address"):
-        call.find_appointment_options()
+        call.find_appointment_options(caller_says_member=False)
     assert call.outcome == "out_of_area"
 
 
@@ -201,7 +201,7 @@ def test_commercial_caller_is_a_lead_not_a_booking(make_call):
     result = call.check_service_address(zip_code="11743", property_type="restaurant")
     assert "callback" in result
     with pytest.raises(ActionRefused, match="Commercial"):
-        call.find_appointment_options()
+        call.find_appointment_options(caller_says_member=False)
     call.request_callback("631 555 0100", "commercial lead: rooftop unit down")
     assert call.outcome == "commercial_lead"
 
@@ -254,6 +254,7 @@ def test_good_booking_goes_through_and_creates_the_customer(make_call, seeded):
 
 def test_unverified_booking_does_not_overwrite_the_account(make_call, seeded):
     call = make_call("+15165550142")
+    call.lookup_customer(confirmed_name=False)  # "No, this is Chris."
     option = ready_to_book(call, zip_code="11501")
     read_back(call, "516-555-0142", "1 Other St")
     call.book_appointment(
@@ -415,7 +416,7 @@ def test_p0_01_replayed_never_reaches_scheduling(make_call):
     )
     call.check_service_address(zip_code="11001", property_type="house")
     with pytest.raises(ActionRefused, match="safety emergency"):
-        call.find_appointment_options()
+        call.find_appointment_options(caller_says_member=False)
     assert call.priority == Priority.P0
 
 
@@ -432,7 +433,7 @@ def test_smell_after_times_were_offered_voids_them(make_call):
     call = make_call(None)
     call.assess_situation(Facts(request_type="tune_up", description="fall tune-up"))
     call.check_service_address(zip_code="11743", property_type="house")
-    offered = call.find_appointment_options()
+    offered = call.find_appointment_options(caller_says_member=False)
     option_id = offered.split("\n")[1].split(":")[0].lstrip("- ")
     call.screen_caller_turn("oh and actually it smelled like rotten eggs this morning")
     assert call.offered == {}
@@ -632,7 +633,7 @@ def test_p2_options_stay_within_72_hours(make_call):
     call = make_call(None)
     call.assess_situation(Facts(no_heat=True, indoor_temp_f=64, vulnerable_occupant=False))
     call.check_service_address(zip_code="11743", property_type="house")
-    call.find_appointment_options()
+    call.find_appointment_options(caller_says_member=False)
     for option in call.offered.values():
         assert (option.day - TUESDAY_10AM.date()).days <= 3
 
@@ -673,20 +674,30 @@ def test_an_expired_active_membership_counts_as_lapsed(make_call, seeded):
 # Membership for unknown callers, technician details, NYC building heat, cancellations
 
 
-def test_an_unknown_caller_is_asked_about_membership_once(make_call):
+def test_no_times_until_an_unknown_caller_answers_the_membership_question(make_call):
     call = make_call(None)
     call.assess_situation(Facts(no_cooling=True, indoor_temp_f=80, vulnerable_occupant=False))
     call.check_service_address(zip_code="11743", property_type="house")
-    first = call.find_appointment_options()
-    assert "already a Summit Comfort Club member" in first
-    assert "member" not in call.find_appointment_options().split("Offer these")[0]
+    with pytest.raises(ActionRefused, match="already a Summit Comfort Club member"):
+        call.find_appointment_options()
+    assert not call.offered  # nothing to offer before the answer
+    with pytest.raises(ActionRefused, match="verify them first"):
+        call.find_appointment_options(caller_says_member=True)
+    assert "Offer these" in call.find_appointment_options(caller_says_member=False)
+
+
+def test_a_greeting_left_unanswered_blocks_the_times(member_call):
+    member_call.assess_situation(Facts(request_type="tune_up"))
+    member_call.check_service_address(zip_code="11501", property_type="house")
+    with pytest.raises(ActionRefused, match="confirmed_name"):
+        member_call.find_appointment_options(caller_says_member=False)
 
 
 def test_the_options_remind_the_agent_what_the_technician_needs(make_call):
     call = make_call(None)
     call.assess_situation(Facts(request_type="tune_up"))
     call.check_service_address(zip_code="11743", property_type="house")
-    assert "what kind of system" in call.find_appointment_options()
+    assert "what kind of system" in call.find_appointment_options(caller_says_member=False)
 
 
 def test_equipment_and_access_reach_the_technician(make_call, seeded):
@@ -705,7 +716,7 @@ def test_heat_from_the_building_is_the_landlords_job(make_call):
     assert "landlord" in result and "311" in result
     assert call.outcome == "building_system"
     with pytest.raises(ActionRefused, match="landlord"):
-        call.find_appointment_options()
+        call.find_appointment_options(caller_says_member=False)
 
 
 def test_a_verified_customer_can_cancel_their_own_appointment(member_call, seeded):
@@ -750,7 +761,7 @@ def test_a_verified_member_at_their_restaurant_has_to_check_the_address(member_c
         )
     )
     with pytest.raises(ActionRefused, match="service address"):
-        member_call.find_appointment_options()
+        member_call.find_appointment_options(caller_says_member=False)
 
 
 def test_a_house_number_read_back_in_words_counts(make_call):
@@ -772,3 +783,92 @@ def test_a_building_heat_call_leaves_a_summary(make_call):
     call = make_call(None)
     call.check_service_address(zip_code="11215", property_type="apartment", heat_from_building=True)
     assert "landlord" in call.technician_summary()
+
+
+# Review findings (Nov 7): backend authority where the model used to decide
+
+
+def test_a_p1_callback_is_urgent_even_if_the_model_says_otherwise(make_call):
+    # Saturday 8 PM, no heat, 82-year-old mother: the model passed urgent=false.
+    from datetime import datetime
+
+    from conftest import TZ
+
+    call = make_call(None, now=datetime(2026, 11, 7, 20, 0, tzinfo=TZ))
+    call.assess_situation(Facts(no_heat=True, vulnerable_occupant=True))
+    result = call.request_callback(phone="516-555-0177", reason="no heat, elderly mother", urgent=False)
+    assert "within 30 minutes" in result
+    assert call.store.callbacks_for_call("call-1")[0]["urgent"]
+
+
+def test_a_long_call_that_is_still_talking_is_not_closed_as_abandoned(make_call, seeded, cfg):
+    from datetime import timedelta
+
+    from conftest import TUESDAY_10AM
+
+    from summit.backend import close_abandoned_calls
+
+    now = {"t": TUESDAY_10AM}
+    call = make_call("+16315550144", call_id="long")
+    call._clock = lambda: now["t"]
+    call.assess_situation(Facts(no_heat=True, indoor_temp_f=55))
+    now["t"] = TUESDAY_10AM + timedelta(minutes=29)
+    call.save()  # still talking: the heartbeat moves
+    assert close_abandoned_calls(seeded, cfg, TUESDAY_10AM + timedelta(minutes=31)) == 0
+    assert seeded.get_call("long")["ended_at"] is None
+
+
+def test_a_closed_call_is_not_reopened_by_a_late_save(make_call, seeded, cfg):
+    from datetime import timedelta
+
+    from conftest import TUESDAY_10AM
+
+    from summit.backend import close_abandoned_calls
+
+    call = make_call("+16315550144", call_id="late")
+    call.assess_situation(Facts(no_heat=True, indoor_temp_f=55))
+    call.save()
+    close_abandoned_calls(seeded, cfg, TUESDAY_10AM + timedelta(minutes=45))
+    call.save()  # the worker wasn't dead after all
+    assert seeded.get_call("late")["ended_at"] is not None
+    call.finalize([])  # its hang-up sees the recovery's callback and doesn't add another
+    assert len(seeded.callbacks_for_call("late")) == 1
+
+
+def test_a_town_only_check_books_with_a_zip_in_that_county(make_call):
+    call = make_call(None)
+    call.assess_situation(Facts(request_type="tune_up"))
+    call.check_service_address(town="Syosset", property_type="house")  # no ZIP given
+    call.find_appointment_options(caller_says_member=False)
+    option = next(iter(call.offered))
+    read_back(call, "631-555-0123", "9 Birch Court, Syosset")
+    booking = {**GOOD_BOOKING, "address": "9 Birch Court, Syosset", "zip_code": "11791"}
+    assert call.book_appointment(option, **booking).startswith("Booked")
+
+
+def test_a_town_only_check_refuses_a_zip_from_another_county(make_call):
+    call = make_call(None)
+    call.assess_situation(Facts(request_type="tune_up"))
+    call.check_service_address(town="Syosset", property_type="house")
+    call.find_appointment_options(caller_says_member=False)
+    option = next(iter(call.offered))
+    read_back(call)
+    with pytest.raises(ActionRefused, match="doesn't match"):
+        call.book_appointment(option, **GOOD_BOOKING)  # 11743 is Huntington, Suffolk
+
+
+def test_a_past_appointment_cannot_be_cancelled_or_moved(member_call, seeded):
+    from datetime import date
+
+    from summit.models import Pool
+
+    old = seeded.insert_appointment(
+        customer_id=1, call_id=None, county="Nassau", day=date(2026, 10, 1), window="10:00-12:00",
+        pool=Pool.REGULAR, job_type="tune-up", priority=Priority.P3, service_address="12 Elm Street",
+        contact_name="Dana Reyes", contact_phone="+15165550142",
+    )  # fmt: skip
+    member_call.lookup_customer(confirmed_name=True)
+    with pytest.raises(ActionRefused, match="isn't an upcoming appointment"):
+        member_call.cancel_appointment(old)
+    with pytest.raises(ActionRefused, match="isn't an upcoming appointment"):
+        member_call.find_appointment_options(reschedule_appointment_id=old)

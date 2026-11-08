@@ -67,7 +67,7 @@ def test_a_words_only_p0_offers_the_office_callback(make_call):
     call.screen_caller_turn("There's a skunk smell by the furnace.")
     assert call.hazard_from_words_only
     with pytest.raises(ActionRefused, match="offer a callback from the office"):
-        call.find_appointment_options()
+        call.find_appointment_options(caller_says_member=False)
     assert "request_callback" in call.emergency_note()
     # The callback itself is allowed on a P0 call.
     assert call.request_callback("631-555-0100", "wants a furnace visit; said there's no gas").startswith(
@@ -81,7 +81,7 @@ def test_a_p0_the_model_confirms_is_not_words_only(make_call):
     call.assess_situation(Facts(gas_smell=True, description="skunk smell by the furnace"))
     assert call.priority == Priority.P0 and not call.hazard_from_words_only
     with pytest.raises(ActionRefused) as refused:
-        call.find_appointment_options()
+        call.find_appointment_options(caller_says_member=False)
     assert "callback" not in str(refused.value)
 
 

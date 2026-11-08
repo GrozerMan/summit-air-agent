@@ -122,8 +122,13 @@ class SummitAgent(Agent):
             if fixed:
                 return _speak(fixed)
         else:
-            # The turn right after a tool. A booking or a move just went through, so the
-            # confirmation is spoken from the booking record instead of worded by the model.
+            # The turn right after a tool. A hazard only the model reported has just made the
+            # call P0: the script is spoken as fixed text, as on the word-screen path.
+            script = self.call.unsaid_safety_script(said)
+            if script:
+                return _speak(script)
+            # Or a booking or a move just went through: the confirmation is spoken from the
+            # booking record instead of worded by the model.
             confirmation = self.call.take_announcement()
             if confirmation:
                 return _speak(confirmation)
@@ -249,15 +254,22 @@ class SummitAgent(Agent):
 
     @function_tool
     async def find_appointment_options(
-        self, context: RunContext, reschedule_appointment_id: int | None = None
+        self,
+        context: RunContext,
+        reschedule_appointment_id: int | None = None,
+        caller_says_member: bool | None = None,
     ) -> str:
         """Get arrival windows to offer. For a new visit, call it after assess_situation and
         check_service_address. To move an existing appointment, pass its id.
 
         Args:
             reschedule_appointment_id: The id of the appointment being moved, if rescheduling.
+            caller_says_member: For a caller who isn't verified: their answer when asked whether
+                they're already a member. Leave empty until you've asked.
         """
-        args = dict(reschedule_appointment_id=reschedule_appointment_id)
+        args = dict(
+            reschedule_appointment_id=reschedule_appointment_id, caller_says_member=caller_says_member
+        )
         return self._run("find_appointment_options", args, lambda: self.call.find_appointment_options(**args))
 
     @function_tool

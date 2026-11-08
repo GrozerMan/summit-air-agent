@@ -199,13 +199,16 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
 
     # Scheduling
 
-    def find_appointment_options(self, reschedule_appointment_id: int | None = None) -> str:
+    def find_appointment_options(
+        self, reschedule_appointment_id: int | None = None, caller_says_member: bool | None = None
+    ) -> str:
         self._refuse_if_emergency()
         if reschedule_appointment_id is not None:
             appointment = self._own_appointment(reschedule_appointment_id)
             county, priority = appointment.county, appointment.priority
         else:
             self._check_ready_to_schedule()
+            self._check_membership_asked(caller_says_member)
             assert self.assessment and self.area and self.area.county
             county, priority = self.area.county, self.assessment.priority
 
@@ -223,8 +226,7 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         self.offered.update({o.option_id: o for o in options})
         self.offered_for.update({o.option_id: reschedule_appointment_id for o in options})
         today = self.now().date()
-        lines = [self._before_offering()] if reschedule_appointment_id is None else []
-        lines = [line for line in lines if line]
+        lines = []
         for option in options:
             surcharge = (
                 f" (after-hours visit, +${self.cfg['pricing']['after_hours_surcharge']})"
@@ -242,25 +244,33 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
             + self._tech_details_reminder()
         )
 
-    def _before_offering(self) -> str:
-        """Once per call: find out whether an unknown caller is already a member, so a member
-        calling from a new number isn't charged the diagnostic fee or kept out of member times."""
-        if self.customer or self.membership_asked:
-            return ""
-        self.membership_asked = True
+    def _check_membership_asked(self, caller_says_member: bool | None) -> None:
+        """No times exist until we know whether an unknown caller is already a member, so a
+        member calling from a new number isn't charged the diagnostic fee or kept out of member
+        times. A checkpoint in code: the times come back only after the answer is reported."""
+        if self.customer:
+            return
         if self.caller_match:
-            return (
-                f"FIRST: the greeting asked if this is {self.caller_match.first_name}. Report their answer with "
-                "lookup_customer(confirmed_name=...) before offering times."
+            raise ActionRefused(
+                f"The greeting asked if this is {self.caller_match.first_name}. Report their answer with "
+                "lookup_customer(confirmed_name=...) first."
             )
         if self.lookup_attempts:
-            return ""
+            return  # they were looked up already; no match means a new customer
         club = self.cfg["membership"]["name"]
-        return (
-            f"FIRST, before offering times: ask once whether they're already a {club} member or have had "
-            "us out before. If yes, verify them (lookup_customer) and call find_appointment_options again: "
-            "members get priority windows and no diagnostic fee. If not, offer these."
-        )
+        if caller_says_member is None:
+            self.membership_asked = True
+            raise ActionRefused(
+                f"Before offering times, ask once whether they're already a {club} member or have had us out "
+                "before. Then call find_appointment_options again with caller_says_member set to their answer."
+            )
+        if caller_says_member:
+            raise ActionRefused(
+                "They say they're a member: verify them first (lookup_customer with the account's phone number, "
+                "last name and ZIP), then call find_appointment_options again. Members get priority windows and "
+                "no diagnostic fee."
+            )
+        self.membership_asked = True
 
     def _tech_details_reminder(self) -> str:
         return (
@@ -373,6 +383,12 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
             problems.append("missing " + ", ".join(missing))
         if phone and not phone_e164:
             problems.append(f"'{phone}' isn't a valid 10-digit US phone number")
+        if zip_code and self.area is not None and self.area.zip is None and zip5:
+            # The address was checked by town only ("Syosset, don't know the ZIP"): the ZIP given
+            # now must be one of ours, in the same county, and becomes the checked ZIP.
+            by_zip = check_zip(zip5, self.cfg)
+            if by_zip.in_area and by_zip.county == self.area.county:
+                self.area = by_zip
         if zip_code and (self.area is None or zip5 != self.area.zip):
             checked = self.area.zip if self.area else "none"
             problems.append(
@@ -567,6 +583,7 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
             appointment is None
             or appointment.customer_id != self.customer.id
             or appointment.status != "booked"
+            or appointment.day < self.now().date()
         ):
             raise ActionRefused(
                 f"Appointment #{appointment_id} isn't an upcoming appointment on this account."
@@ -595,6 +612,9 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         if not reason.strip():
             raise ActionRefused("Say what the callback is about (reason).")
 
+        # The call's priority decides, not the model's flag: a P1 callback is urgent even if
+        # the tool call said urgent=false (an elderly caller with no heat waited until Monday).
+        urgent = urgent or self.priority == Priority.P1
         due = self._add_callback(number, reason.strip(), urgent=urgent, name=name)
         self.note(f"{'urgent ' if urgent else ''}callback requested: {reason.strip()[:120]}")
         if urgent:

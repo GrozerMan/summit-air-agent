@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS calls (
     caller_id   TEXT,
     started_at  TEXT NOT NULL,
     ended_at    TEXT,
+    last_seen   TEXT,  -- the call's heartbeat: every save moves it
     priority    INTEGER,
     outcome     TEXT,
     summary     TEXT,
@@ -150,6 +151,7 @@ class Store:
             self.conn.execute(
                 "ALTER TABLE customers ADD COLUMN IF NOT EXISTS confirmed INTEGER NOT NULL DEFAULT 1"
             )
+            self.conn.execute("ALTER TABLE calls ADD COLUMN IF NOT EXISTS last_seen TEXT")
             return
         self.path = str(path or config.db_path())
         if self.path != ":memory:":
@@ -173,6 +175,9 @@ class Store:
         columns = [r[1] for r in self.conn.execute("PRAGMA table_info(customers)")]
         if columns and "confirmed" not in columns:
             self.conn.execute("ALTER TABLE customers ADD COLUMN confirmed INTEGER NOT NULL DEFAULT 1")
+        call_columns = [r[1] for r in self.conn.execute("PRAGMA table_info(calls)")]
+        if call_columns and "last_seen" not in call_columns:
+            self.conn.execute("ALTER TABLE calls ADD COLUMN last_seen TEXT")
         # Databases made before 'on_hold' existed reject it; rebuild the table with the new CHECK.
         row = self.conn.execute("SELECT sql FROM sqlite_master WHERE name = 'appointments'").fetchone()
         if row is None or "on_hold" in row[0]:
@@ -373,11 +378,14 @@ class Store:
         outcome: str | None = None,
         summary: str | None = None,
         ended_at: datetime | None = None,
+        last_seen: datetime | None = None,
     ) -> None:
+        # A call once ended stays ended: a late save from its worker can't reopen it.
         self.conn.execute(
-            "INSERT INTO calls (id, caller_id, started_at, ended_at, priority, outcome, summary, "
-            "record, transcript) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT (id) DO UPDATE SET ended_at = excluded.ended_at, "
+            "INSERT INTO calls (id, caller_id, started_at, ended_at, last_seen, priority, outcome, summary, "
+            "record, transcript) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (id) DO UPDATE SET ended_at = COALESCE(calls.ended_at, excluded.ended_at), "
+            "last_seen = excluded.last_seen, "
             "priority = excluded.priority, outcome = excluded.outcome, summary = excluded.summary, "
             "record = excluded.record, "
             "transcript = CASE WHEN excluded.transcript = '[]' THEN calls.transcript "
@@ -387,6 +395,7 @@ class Store:
                 caller_id,
                 started_at.isoformat(),
                 ended_at.isoformat() if ended_at else None,
+                (last_seen or started_at).isoformat(),
                 int(priority) if priority is not None else None,
                 outcome,
                 summary,
@@ -404,14 +413,17 @@ class Store:
         call["transcript"] = json.loads(call["transcript"])
         return call
 
-    def open_calls_started_before(self, cutoff: datetime) -> list[dict[str, Any]]:
-        """Calls with no end time that started before `cutoff`: their worker died mid-call."""
+    def open_calls_silent_since(self, cutoff: datetime) -> list[dict[str, Any]]:
+        """Calls with no end time whose last save was before `cutoff`. A live call saves on
+        every line and tool call (and the silence check hangs up within a minute), so one
+        that has gone quiet this long lost its worker. A long call that is still talking
+        keeps its heartbeat fresh and is left alone."""
         # Compared as datetimes, not strings: an ISO string's UTC offset changes with DST.
         rows = self.conn.execute("SELECT * FROM calls WHERE ended_at IS NULL").fetchall()
         return [
             {**dict(r), "record": json.loads(r["record"])}
             for r in rows
-            if datetime.fromisoformat(r["started_at"]) < cutoff
+            if datetime.fromisoformat(r["last_seen"] or r["started_at"]) < cutoff
         ]
 
     def close_call(self, call_id: str, outcome: str, ended_at: datetime) -> None:

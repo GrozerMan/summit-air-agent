@@ -54,7 +54,7 @@ def refused(fn, *a, **kw):
 
 
 def options(call):
-    text = call.find_appointment_options()
+    text = call.find_appointment_options(caller_says_member=False)
     return [l.split(":")[0].strip("- ").strip() for l in text.splitlines() if l.startswith("- ")]
 
 
@@ -377,7 +377,7 @@ def hazards():
     record(s, "agent asks 'any gas smell right now?' -> 'No, I don't smell any gas right now.' stays bookable",
            call.priority != Priority.P0, f"priority=P{int(call.priority)}; spoke script={bool(fixed)}")
     call.check_service_address(zip_code="11801", property_type="house")
-    r, out = refused(call.find_appointment_options)
+    r, out = refused(call.find_appointment_options, caller_says_member=False)
     record(s, "...and can still be offered times", not r, out[:110])
 
 
