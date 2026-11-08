@@ -9,8 +9,10 @@ eligibility, availability, price) comes back from summit/ through the tools belo
 """
 
 import asyncio
+import inspect
 import logging
 import os
+import re
 import uuid
 from collections.abc import AsyncIterable, Awaitable, Callable
 from datetime import datetime
@@ -40,6 +42,7 @@ from livekit.plugins import krisp
 from summit import config
 from summit.backend import ActionRefused, CallSession, caller_turn_to_screen, close_abandoned_calls
 from summit.call_metrics import CallMetrics
+from summit.claims import booking_claims, callback_claims
 from summit.notify import Notifier
 from summit.store import Store
 from summit.triage import Facts
@@ -137,7 +140,64 @@ class SummitAgent(Agent):
         if note:
             chat_ctx = chat_ctx.copy()
             chat_ctx.add_message(role="system", content=note)
-        return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+        return self._hold_back_false_claims(Agent.default.llm_node(self, chat_ctx, tools, model_settings))
+
+    async def _hold_back_false_claims(self, stream: Any) -> AsyncIterable[Any]:
+        """The model's reply, a sentence at a time, minus any sentence claiming a booking or a
+        callback the records don't show. In a live run the agent read the details back, heard
+        "yes", and said "you're booked" without calling book_appointment again. The hang-up check
+        caught it, but the caller had already heard it. Now the sentence is never spoken: the
+        caller hears that we're putting it through, and the model is sent back to the tool."""
+        if inspect.isawaitable(stream):
+            stream = await stream
+        held: list[str] = []
+        pending = ""
+
+        def checked(sentence: str) -> str | None:
+            if booking_claims(sentence) and not self.call.has_booking():
+                held.append(sentence.strip())
+                return None
+            if callback_claims(sentence) and not self.call.callbacks:
+                held.append(sentence.strip())
+                return None
+            return sentence
+
+        async for chunk in stream:
+            if isinstance(chunk, str):
+                text = chunk
+            elif isinstance(chunk, llm.ChatChunk) and chunk.delta and chunk.delta.content:
+                text = chunk.delta.content
+                if chunk.delta.tool_calls:
+                    yield llm.ChatChunk(
+                        id=chunk.id,
+                        delta=llm.ChoiceDelta(role=chunk.delta.role, tool_calls=chunk.delta.tool_calls),
+                        usage=chunk.usage,
+                    )
+            else:
+                yield chunk  # tool calls, usage, flush markers: untouched
+                continue
+            pending += text
+            # Speak each finished sentence as soon as it's checked.
+            while match := re.search(r"[.!?](?:\s+|$)(?=\S)", pending):
+                sentence, pending = pending[: match.end()], pending[match.end() :]
+                if (ok := checked(sentence)) is not None:
+                    yield ok
+        if pending and (ok := checked(pending)) is not None:
+            yield ok
+        if held:
+            self.call.note("held back an unbacked claim: " + " | ".join(held)[:200])
+            logger.warning("held back unbacked claim: %s", held)
+            yield " One moment while I put that through."
+            try:
+                self.session.generate_reply(
+                    instructions=(
+                        "You were about to tell the caller something was booked or arranged, but no tool has "
+                        "confirmed it. Call book_appointment (or request_callback) now with the details they "
+                        "confirmed, and say only what the tool returns."
+                    )
+                )
+            except RuntimeError:
+                pass  # not in a live session (tests)
 
     def _run(self, tool: str, args: dict[str, Any], action: Callable[[], str]) -> str:
         try:

@@ -167,6 +167,14 @@ _DENIAL_FILLER = {
     "detect", "detected", "get", "got", "spark", "sparks", "sparking", "smoke", "smoking",
     "flames", "fire", "gas", "of", "sign", "signs", "evidence",
 }  # fmt: skip
+# Nouns of a listed denial: "I don't notice any smells, smoke, or alarms" is one denial
+# across its commas. Only a segment holding one of these lets the scope cross a comma, so
+# "No, smoke is coming out" (a bare "No" before the comma) still counts.
+_LIST_NOUNS = {
+    "smell", "smells", "odor", "odors", "odour", "odours", "smoke", "sparks", "spark", "flames",
+    "fire", "fumes", "gas", "alarm", "alarms", "leak", "leaks", "noise", "noises",
+}  # fmt: skip
+_DENIAL_FILLER |= _LIST_NOUNS | {"like", "nothing", "anything", "else"}
 # "not sure", "don't know", "don't think" are doubt, not denial: still escalate.
 _HEDGES = {"sure", "know", "certain", "positive", "think"}
 # A denial that admits the past: "I don't smell gas anymore", "not now, but it did this
@@ -244,8 +252,21 @@ def _negated(text: str, match: re.Match[str]) -> bool:
     """A plain denial: the negation sits right before the hazard ("doesn't smell like
     gas", "no gas smell", "no smoke or sparks"), or right before the alarm verb inside
     the match ("the CO alarm isn't going off"). A comma ends the scope, so "No, it
-    smells like gas" still counts."""
-    before = _WORD.findall(_clause_before(text, match.start()))
+    smells like gas" still counts, except inside a list ("no smells, smoke, or alarms")."""
+    segments = re.split(r"[,;]", _sentence_before(text, match.start()))
+    before = _WORD.findall(segments[-1])
+    # Still the list ("smoke, or alarms.") rather than a new statement ("smoke is coming out").
+    rest = _WORD.findall(re.split(r"[,;.!?]", text[match.end() :])[0])
+    in_a_list = all(w.lower() in _DENIAL_FILLER for w in rest)
+    i = len(segments) - 1
+    while (
+        in_a_list
+        and i > 0
+        and all(w.lower() in _DENIAL_FILLER for w in before)
+        and any(w.lower() in _LIST_NOUNS for w in _WORD.findall(segments[i - 1]))
+    ):
+        i -= 1
+        before = _WORD.findall(segments[i]) + before
     for word in reversed(before):
         if _NEGATION.fullmatch(word):
             return True

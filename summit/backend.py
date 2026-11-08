@@ -402,7 +402,12 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         elif not address_read_back_confirmed or not self._read_back_address(address):
             problems.append("read the full address back and get a yes")
         if problems:
-            raise ActionRefused("Not booked yet: " + "; ".join(problems) + ".")
+            raise ActionRefused(
+                "NOT BOOKED. Fix this: "
+                + "; ".join(problems)
+                + ". Then call book_appointment again. Nothing "
+                "is booked, and you must not say it is, until book_appointment returns 'Booked'."
+            )
 
         assert option and phone_e164 and zip5 and self.assessment
         customer_id, created = self._customer_for_booking(

@@ -111,3 +111,32 @@ async def test_a_hazard_only_the_model_reported_is_still_spoken_as_fixed_text(ma
     ctx.insert(llm.FunctionCallOutput(call_id="c1", name="assess_situation", output=result, is_error=False))
     said = "".join([chunk async for chunk in agent.llm_node(ctx, [], ModelSettings())])
     assert said == call.safety_script()
+
+
+async def _collect(agent, pieces):
+    async def stream():
+        for piece in pieces:
+            yield piece
+
+    return "".join([chunk async for chunk in agent._hold_back_false_claims(stream())])
+
+
+async def test_a_booking_claim_with_nothing_booked_is_never_spoken(make_call):
+    # Live round 3: read-backs confirmed, then "booked" without calling book_appointment again.
+    call = make_call(None)
+    agent = SummitAgent(call)
+    said = await _collect(
+        agent, ["Thanks, Omar. ", "Your appointment is booked for tomorrow ", "between 10 and noon."]
+    )
+    assert "booked" not in said and said.startswith("Thanks, Omar.")
+    assert "put that through" in said
+    assert any("held back" in note for note in call.notes)
+
+
+async def test_ordinary_replies_and_real_bookings_pass_through(make_call, seeded):
+    call = make_call(None)
+    agent = SummitAgent(call)
+    text = "Which of these works for you? I can get you booked for tomorrow if you like."
+    assert await _collect(agent, [text]) == text
+    call.booked.append(1)
+    assert "booked" in await _collect(agent, ["You're booked for tomorrow."])

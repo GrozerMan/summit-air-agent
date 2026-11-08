@@ -67,20 +67,25 @@ class RecordsMixin:
             self.outcome = "info_only" if self.tool_log else "abandoned"
         self.save(transcript=transcript, ended=True)
 
+    def has_booking(self) -> bool:
+        """Something the agent may truthfully call booked: a visit booked or moved on this call,
+        or (unless today's call is about a new problem) the customer's existing appointment,
+        which backs "you're scheduled for Thursday"."""
+        new_problem = self.priority in (Priority.P1, Priority.P2)
+        return bool(self.booked) or bool(
+            self.customer
+            and not new_problem
+            and self.store.upcoming_appointments(self.customer.id, self.now().date())
+        )
+
     def _flag_false_claims(self, transcript: list[dict[str, Any]]) -> None:
         """The agent said it booked something, or that someone will call, and the records
         say otherwise. The caller is now expecting a technician or a call that isn't coming,
         so the office has to hear about it."""
         said = " ".join(t.get("text", "") for t in transcript if t.get("role") == "assistant")
-        # A customer's existing appointment can back "you're scheduled for Thursday", but not
-        # a claim that today's new problem was booked when nothing was.
-        new_problem = self.priority in (Priority.P1, Priority.P2)
-        has_booking = bool(self.booked) or bool(
-            self.customer
-            and not new_problem
-            and self.store.upcoming_appointments(self.customer.id, self.now().date())
+        self.false_claims = false_claims(
+            said, has_booking=self.has_booking(), has_callback=bool(self.callbacks)
         )
-        self.false_claims = false_claims(said, has_booking=has_booking, has_callback=bool(self.callbacks))
         if not self.false_claims:
             return
         self.note("REVIEW: " + "; ".join(self.false_claims))

@@ -285,3 +285,22 @@ def test_one_persons_flu_is_not_co_but_a_sick_household_still_is():
         hazard_in("The heat's out and the kids have a stomach bug, they've been throwing up all night.")
         == "co"
     )
+
+
+@pytest.mark.parametrize(
+    "text, hazard",
+    [
+        # Live round 3: a listed denial made the call a fire emergency.
+        ("No, I don't notice any smells, smoke, or alarms.", None),
+        ("No smells, no smoke, nothing.", None),
+        ("nothing like gas, smoke or sparks", None),
+        ("No gas, smoke or sparks, it just stopped", None),
+        # ...but a new statement after the comma is not part of the denial.
+        ("No, smoke is coming out of the vent", "fire"),
+        ("I don't smell gas, smoke is coming from the unit", "fire"),
+        ("There are no smells, but sparks came out of the outlet", "fire"),
+        ("No, it smells like gas", "gas"),
+    ],
+)
+def test_a_denial_covers_its_list_and_nothing_after_it(text, hazard):
+    assert hazard_in(text) == hazard
