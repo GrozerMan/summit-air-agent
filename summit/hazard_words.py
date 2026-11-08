@@ -22,6 +22,8 @@ the caller's time, and a missed gas leak can cost a house. The carve-outs are na
   said no".
 - HVAC words that only look like fire: the furnace "won't fire" or "fires up", a
   spark igniter, a smoke detector chirping.
+- Everyday words that only look like fire: "it's smoking hot in here", "my husband
+  smokes", cigarette smoke, "a fire going in the fireplace".
 """
 
 import re
@@ -52,6 +54,18 @@ _GAS_PATTERNS = [
         re.I,
     ),
     re.compile(rf"\b(?:{_SMELL})\s+(?:like\s+)?(?:rotten\s+)?eggs?\b", re.I),
+    # "a sewer smell coming from the furnace room": by a gas appliance, treat it as gas.
+    re.compile(
+        r"\bsewer\w*\b(?:\W+\w+){0,8}?\W+(?:furnace|boiler|heater|stove|meter|pilot|gas)\b"
+        r"|\b(?:furnace|boiler|heater|stove|meter|pilot)\b(?:\W+\w+){0,8}?\W+sewer\w*\b",
+        re.I,
+    ),
+    # "the pilot light went out and now there's a weird smell"
+    re.compile(
+        r"\bpilot(?:\s+light)?\b(?:\W+\w+){0,10}?\W+(?:smell\w*|odou?r\w*|stinks?)\b"
+        r"|\b(?:smell\w*|odou?r\w*)\b(?:\W+\w+){0,8}?\W+pilot(?:\s+light)?\s+(?:is|was|went)\s+out\b",
+        re.I,
+    ),
     # Suspicion with no smell word: "it might be gas", "I'm worried it's gas".
     re.compile(
         r"\b(?:might\s+be|may\s+be|could\s+be|must\s+be|worried\s+(?:it'?s|it\s+is|about)|"
@@ -64,13 +78,14 @@ _GAS_PATTERNS = [
 # A CO alarm that is sounding. A chirp is usually a low battery, so "chirping" is
 # deliberately missing: the agent should ask about it, not evacuate on it.
 _CO = r"carbon\s+monoxide|co|c\.o\.|c\s+o"
-_DEVICE = r"alarms?|detectors?|monitors?|sensors?"
+_DEVICE = r"alarms?|detectors?|monitors?|sensors?|thing|box"
 _SOUNDING = (
     r"going\s+off|went\s+off|goes\s+off|go\s+off|keeps\s+going|beep\w*|sound\w*|alarm\w*|ringing|"
     r"screaming|blaring|going\s+crazy|went\s+crazy|gone\s+crazy|won'?t\s+stop|flashing|triggered"
 )
 _CO_PATTERNS = [
-    re.compile(rf"\b(?:{_CO})\s+(?:{_DEVICE})\b(?:\W+\w+){{0,3}}?\W+(?:{_SOUNDING})", re.I),
+    # "the CO detector says CO and is beeping", "the CO thing on the wall keeps going off"
+    re.compile(rf"\b(?:{_CO})\s+(?:{_DEVICE})\b(?:\W+\w+){{0,5}}?\W+(?:{_SOUNDING})", re.I),
     # "the detector for carbon monoxide keeps beeping", "the alarm that says CO on it is going off"
     re.compile(
         rf"\b(?:{_DEVICE})\s+(?:for|that\s+(?:says|reads|detects))\s+(?:{_CO})\b"
@@ -109,21 +124,26 @@ _HEAT_CONTEXT = re.compile(
 # Smoke, sparks, flames. HVAC speech is full of fire words that aren't fires: a furnace
 # that "won't fire" or "fires up", a spark igniter, a smoke detector with a low battery.
 _FIRE_PATTERNS = [
-    re.compile(r"\bspark(?:s|ed|ing|y)?\b(?!\s*-?\s*(?:igniters?|ignitors?|ignition|electrodes?|plugs?))", re.I),
+    re.compile(
+        r"\bspark(?:s|ed|ing|y)?\b(?!\s*-?\s*(?:igniters?|ignitors?|ignition|electrodes?|plugs?))", re.I
+    ),
     re.compile(r"\bsmok(?:e|ed|es|ing|y|ey)\b(?!\s+(?:detectors?|alarms?)\b)", re.I),
     re.compile(
-        r"\bsmoke\s+(?:detectors?|alarms?)\b(?:\W+\w+){0,3}?\W+"
+        r"\b(?:smoke|fire)\s+(?:detectors?|alarms?)\b(?:\W+\w+){0,3}?\W+"
         r"(?:going\s+off|went\s+off|goes\s+off|blaring|screaming|beep\w*|sounding|won'?t\s+stop)",
         re.I,
     ),
-    re.compile(r"\bflames\b", re.I),
+    re.compile(
+        r"\bflames\b(?!\s+(?:look|looks|are|is)\s+(?:\w+\s+and\s+)?(?:blue|steady|normal|nice|fine)\b)", re.I
+    ),
     re.compile(
         r"\bflame\b(?:\W+\w+){0,3}?\W+(?:coming|shooting|out\s+of|outside|from\s+the\s+(?:vent|register|unit))",
         re.I,
     ),
-    re.compile(r"\b(?:on|caught|catching|catch)\s+fire\b", re.I),
+    re.compile(r"\b(?:on|caught|catching|catch)\s+fire\b(?!\s+island\b)", re.I),
     re.compile(
-        r"\bfire\b(?!\s+(?:up|it\s+up|off|department|hazard|risk|code|marshal|pit|extinguisher|place)\b)",
+        r"\bfire\b(?!\s+(?:up|it\s+up|off|department|hazard|risk|code|marshal|pit|extinguisher|place|"
+        r"alarms?|detectors?|island|drill|insurance|safety|escape|truck|station|fighters?|proof|rated)\b)",
         re.I,
     ),
 ]
@@ -135,7 +155,7 @@ _FIRE_AS_BURNER = {
 _IGNITER = {"igniter", "ignitor", "igniters", "ignitors", "electrode", "pilot"}
 
 _NEGATION = re.compile(
-    r"no|not|never|none|nothing|nobody|without|denies|denied|deny|\w+n't|dont|doesnt|didnt|isnt|wasnt|"
+    r"no|not|never|none|nothing|nothing'?s|nobody|nobody'?s|without|denies|denied|deny|\w+n't|dont|doesnt|didnt|isnt|wasnt|"
     r"cant|wont|havent|hasnt",
     re.I,
 )
@@ -147,14 +167,29 @@ _DENIAL_FILLER = {
     "detect", "detected", "get", "got", "spark", "sparks", "sparking", "smoke", "smoking",
     "flames", "fire", "gas", "of", "sign", "signs", "evidence",
 }  # fmt: skip
+# Nouns of a listed denial: "I don't notice any smells, smoke, or alarms" is one denial
+# across its commas. Only a segment holding one of these lets the scope cross a comma, so
+# "No, smoke is coming out" (a bare "No" before the comma) still counts.
+_LIST_NOUNS = {
+    "smell", "smells", "odor", "odors", "odour", "odours", "smoke", "sparks", "spark", "flames",
+    "fire", "fumes", "gas", "alarm", "alarms", "leak", "leaks", "noise", "noises",
+}  # fmt: skip
+_DENIAL_FILLER |= _LIST_NOUNS | {"like", "nothing", "anything", "else"}
 # "not sure", "don't know", "don't think" are doubt, not denial: still escalate.
 _HEDGES = {"sure", "know", "certain", "positive", "think"}
-# A denial of right now is an admission of earlier: "I don't smell gas anymore".
-_ONLY_NOW = re.compile(
-    r"\b(?:now|anymore|any\s+more|no\s+longer|at\s+the\s+moment|currently|at\s+this\s+point)\b", re.I
+# A denial that admits the past: "I don't smell gas anymore", "not now, but it did this
+# morning". A bare "right now" is not one of these: asked "any gas smell right now?",
+# "No, I don't smell gas right now" is a plain no, and used to make the call a P0.
+_NO_LONGER = re.compile(r"\b(?:anymore|any\s+more|no\s+longer)\b", re.I)
+_EARLIER = re.compile(
+    r"\b(?:earlier|this\s+morning|yesterday|last\s+night|ago|used\s+to|"
+    r"but\s+(?:it|i|we|there|she|he)\s+(?:did|was|were|had|could))\b",
+    re.I,
 )
 # "I asked my wife if it smells like gas" ... "and she said no".
-_ASKED = re.compile(r"\b(?:asked|asking|ask|checked|checking|check)\b(?:\W+\w+){0,4}?\W+(?:if|whether)\b", re.I)
+_ASKED = re.compile(
+    r"\b(?:asked|asking|ask|checked|checking|check)\b(?:\W+\w+){0,4}?\W+(?:if|whether)\b", re.I
+)
 _ANSWER = re.compile(r"\b(?:said|says|answered|replied|told\s+me)\b\W+(?:that\W+)?(.{0,40})", re.I)
 _ANSWER_NO = re.compile(
     r"^(?:no|nope|nah|not|nothing|just|only|dusty|definitely\s+not|it'?s\s+(?:just|only|not|dusty)|"
@@ -217,22 +252,35 @@ def _negated(text: str, match: re.Match[str]) -> bool:
     """A plain denial: the negation sits right before the hazard ("doesn't smell like
     gas", "no gas smell", "no smoke or sparks"), or right before the alarm verb inside
     the match ("the CO alarm isn't going off"). A comma ends the scope, so "No, it
-    smells like gas" still counts."""
-    before = _WORD.findall(_clause_before(text, match.start()))
+    smells like gas" still counts, except inside a list ("no smells, smoke, or alarms")."""
+    segments = re.split(r"[,;]", _sentence_before(text, match.start()))
+    before = _WORD.findall(segments[-1])
+    # Still the list ("smoke, or alarms.") rather than a new statement ("smoke is coming out").
+    rest = _WORD.findall(re.split(r"[,;.!?]", text[match.end() :])[0])
+    in_a_list = all(w.lower() in _DENIAL_FILLER for w in rest)
+    i = len(segments) - 1
+    while (
+        in_a_list
+        and i > 0
+        and all(w.lower() in _DENIAL_FILLER for w in before)
+        and any(w.lower() in _LIST_NOUNS for w in _WORD.findall(segments[i - 1]))
+    ):
+        i -= 1
+        before = _WORD.findall(segments[i]) + before
     for word in reversed(before):
         if _NEGATION.fullmatch(word):
             return True
         if word.lower() not in _DENIAL_FILLER:
             break
     inside = _WORD.findall(match.group(0))
-    for word, following in zip(inside, inside[1:]):
+    for word, following in zip(inside, inside[1:], strict=False):
         if _NEGATION.fullmatch(word) and following.lower() not in _HEDGES:
             return True
     return False
 
 
 def _asked_and_denied(text: str, match: re.Match[str]) -> bool:
-    """"I asked my wife if it smells like gas and she said no." A question about the
+    """ "I asked my wife if it smells like gas and she said no." A question about the
     hazard that got a no. Unanswered, or answered anything but no, it still counts."""
     if not _ASKED.search(_sentence_before(text, match.start())):
         return False
@@ -244,8 +292,11 @@ def _not_a_hazard(text: str, match: re.Match[str]) -> bool:
     if _asked_and_denied(text, match):
         return True
     if _negated(text, match):
-        # "I don't smell gas anymore", "it's not sparking now": it was there earlier.
-        return not _ONLY_NOW.search(_clause_after(text, match.end()))
+        # "I don't smell gas anymore", "not sparking now but it was earlier": it was there.
+        admits_past = _NO_LONGER.search(_clause_after(text, match.end())) or _EARLIER.search(
+            text[match.end() : match.end() + 150]
+        )
+        return not admits_past
     return False
 
 
@@ -278,18 +329,83 @@ def _burner_word(text: str, match: re.Match[str]) -> bool:
     return False
 
 
+# Smoke and fire words that aren't a fire in the house: "it's smoking hot in here" (a
+# heat wave, no AC), "my husband smokes", "cigarette smoke", "a fire in the fireplace".
+_PERSON_BEFORE = re.compile(
+    r"\b(?:i|he|she|they|we|you|he'?s|she'?s|they'?re|husband|wife|son|daughter|dad|father|mom|mother|"
+    r"roommate|tenant|neighbou?r|someone|somebody|guy|kids?)\s+(?:also\s+|still\s+|used\s+to\s+|is\s+|was\s+)?$",
+    re.I,
+)
+_TOBACCO = re.compile(r"\b(?:cigarettes?|cigars?|weed|pot|marijuana|vap\w*|hookah|tobacco|smokers?)\b", re.I)
+_HOT_AFTER = re.compile(r"\s*-?\s*hot\b", re.I)
+_SMOKE_TEST_AFTER = re.compile(r"\s+tests?\b", re.I)
+_DUST = re.compile(r"\b(?:burnt|burning|burned)?\s*dust\w*\b", re.I)
+_WONT_LIGHT = re.compile(
+    r"\b(?:won'?t|doesn'?t|does\s+not|will\s+not|never)\s+(?:light|ignite|catch|kick\s+on|start)|"
+    r"\bbut\s+no\s+flame|\bthen\s+(?:it\s+)?lights\b",
+    re.I,
+)
+_SOMEONE_ELSES_FIRE = re.compile(r"\bneighbou?r'?s?\b|\blast\s+year\b|\byears\s+ago\b", re.I)
+_FIREPLACE_AFTER = re.compile(
+    r"^(?:\W+\w+){0,5}?\W+(?:fireplace|fire\s*pit|firepit|wood\s*(?:burning\s+)?stove|chiminea)\b", re.I
+)
+
+
+def _not_a_house_fire(text: str, match: re.Match[str]) -> bool:
+    if _burner_word(text, match):
+        return True
+    word = match.group(0).lower()
+    after = text[match.end() :]
+    before = _WORD.findall(_clause_before(text, match.start()))
+    sentence = _sentence_before(text, match.start()) + " " + _clause_after(text, match.end())
+    if word.startswith("smok"):
+        if _HOT_AFTER.match(after) or _SMOKE_TEST_AFTER.match(after):
+            return True
+        clause = _clause_before(text, match.start()) + " " + _clause_after(text, match.end())
+        if _TOBACCO.search(clause) or _PERSON_BEFORE.search(_clause_before(text, match.start())):
+            return True
+        # "smells a bit smoky, like burnt dust": the first-run-of-the-season smell.
+        return bool(_DUST.search(sentence))
+    if word.startswith("spark"):
+        # "it clicks and sparks but won't light": the igniter doing its job.
+        return bool(_WONT_LIGHT.search(_clause_after(text, match.end()) or after[:60]))
+    if word == "fire":
+        if _FIREPLACE_AFTER.match(after):
+            return True
+        # "my neighbor's house had a fire last year, so I want my furnace checked"
+        return bool(_SOMEONE_ELSES_FIRE.search(sentence))
+    if word.startswith("flame"):
+        return bool(before) and before[-1].lower() in ("burner", "burners", "pilot")
+    return False
+
+
+_ILLNESS = re.compile(
+    r"\b(?:the\s+flu|flu|a\s+cold|stomach\s+bug|virus|covid|food\s+poisoning|migraines?)\b", re.I
+)
+# "This furnace is giving me a headache": a figure of speech, not a symptom.
+_FIGURE_OF_SPEECH = re.compile(r"\b(?:giv\w*|gave)\s+(?:me|us|him|her)\s+(?:a\s+|such\s+a\s+)?$", re.I)
+
+
 def _co_symptoms(text: str) -> bool:
     kinds = set()
     for kind, pattern in _SYMPTOM_PATTERNS.items():
-        if any(not _not_a_hazard(text, m) for m in pattern.finditer(text)):
+        if any(
+            not _not_a_hazard(text, m) and not _FIGURE_OF_SPEECH.search(text[: m.start()])
+            for m in pattern.finditer(text)
+        ):
             kinds.add(kind)
+    several = bool(_SEVERAL_PEOPLE.search(text))
+    if _ILLNESS.search(text) and not several:
+        # "I've had the flu, headache and dizzy all week": one person's illness. A whole
+        # household "with the flu" still counts: CO poisoning is classically mistaken for it.
+        return False
     if len(kinds) >= 2:
         return True
-    return bool(kinds) and bool(_SEVERAL_PEOPLE.search(text) or _HEAT_CONTEXT.search(text))
+    return bool(kinds) and (several or bool(_HEAT_CONTEXT.search(text)))
 
 
 def hazard_in(text: str | None) -> str | None:
-    """"gas", "co", "fire", or None for whatever the caller said."""
+    """ "gas", "co", "fire", or None for whatever the caller said."""
     if not text:
         return None
     text = text.replace("’", "'")
@@ -297,7 +413,7 @@ def hazard_in(text: str | None) -> str | None:
         return "gas"
     if _hits(_CO_PATTERNS, text) or _co_symptoms(text):
         return "co"
-    if _hits(_FIRE_PATTERNS, text, skip=_burner_word):
+    if _hits(_FIRE_PATTERNS, text, skip=_not_a_house_fire):
         return "fire"
     return None
 

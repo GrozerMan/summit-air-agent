@@ -17,41 +17,63 @@ _BOOKED = re.compile(
     r"(?:all\s+|now\s+|been\s+)?(?:booked|scheduled|confirmed|set\s+(?:up\s+)?for)\b",
     re.I,
 )
-# "Someone will give you a call", "the office will call you back".
+# Other ways of saying it's booked: "you're all set for Thursday", "I've got you down",
+# "a technician will be there tomorrow", "we'll see you tomorrow".
+_BOOKED_TOO = re.compile(
+    r"\b(?:all\s+set\s+for|on\s+the\s+(?:schedule|calendar)|got\s+you\s+(?:down|in)|"
+    r"(?:technician|tech|someone)\s+will\s+(?:be\s+(?:there|out)|arrive|come|stop\s+by)|"
+    r"see\s+you\s+(?:tomorrow|today|on|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b",
+    re.I,
+)
+# Booking talk that's a claim even after "when" or "can": "I can confirm you're booked",
+# "when the technician arrives tomorrow, they'll check the furnace".
+_BOOKED_ANYWAY = re.compile(
+    r"\bconfirm\s+(?:that\s+)?you'?re\s+(?:all\s+)?(?:booked|scheduled|set)\b|"
+    r"\b(?:technician|tech)\s+(?:arrives|gets\s+there|comes)\s+(?:tomorrow|today|on\s+\w+day)\b",
+    re.I,
+)
+# "Someone will give you a call", "the office will call you back", "you'll hear from us".
 _CALLBACK = re.compile(
     r"\b(?:give\s+you\s+a\s+(?:call|ring)|call\s+you(?:\s+back)?|reach\s+out\s+to\s+you|be\s+in\s+touch|"
-    r"callback\s+(?:is|has\s+been)\s+(?:set|scheduled|booked))\b",
+    r"callback\s+(?:is|has\s+been)\s+(?:set|scheduled|booked)|"
+    r"(?:will|'ll)\s+(?:reach\s+out|contact\s+you|follow\s+up|get\s+back\s+to\s+you)|"
+    r"you'?ll\s+(?:hear\s+from|get\s+a\s+call)|expect\s+a\s+call)\b",
     re.I,
 )
 # Words before the claim that make it an offer or a condition rather than a statement:
 # "I can get you booked for...", "If you'd like, the office can call you back".
 _NOT_A_CLAIM = re.compile(
-    r"\b(?:would|could|can|shall|should|want|like|if|once|when|before|after|try|able|let\s+me|"
+    r"\b(?:would|could|can|shall|should|want|like|if|once(?!\s+again)|when|before|after|try|able|let\s+me|"
     r"not|never|haven'?t|hasn'?t|isn'?t|aren'?t|wasn'?t|can'?t|won'?t|don'?t|nothing)\b",
     re.I,
 )
 
 
-def _claims(pattern: re.Pattern[str], text: str) -> list[str]:
+def _claims(patterns: list[re.Pattern[str]], text: str, anyway: re.Pattern[str] | None = None) -> list[str]:
     found = []
     for sentence in _SENTENCE.split(text.replace("’", "'")):
         if sentence.rstrip().endswith("?"):
             continue
-        for match in pattern.finditer(sentence):
-            if not _NOT_A_CLAIM.search(sentence[: match.start()]):
-                found.append(sentence.strip())
-                break
+        if anyway and anyway.search(sentence):
+            found.append(sentence.strip())
+            continue
+        if any(
+            not _NOT_A_CLAIM.search(sentence[: match.start()])
+            for pattern in patterns
+            for match in pattern.finditer(sentence)
+        ):
+            found.append(sentence.strip())
     return found
 
 
 def booking_claims(text: str) -> list[str]:
     """Sentences where the agent says something is booked or scheduled."""
-    return _claims(_BOOKED, text)
+    return _claims([_BOOKED, _BOOKED_TOO], text, anyway=_BOOKED_ANYWAY)
 
 
 def callback_claims(text: str) -> list[str]:
     """Sentences where the agent says someone will call the caller."""
-    return _claims(_CALLBACK, text)
+    return _claims([_CALLBACK], text)
 
 
 def false_claims(agent_text: str, *, has_booking: bool, has_callback: bool) -> list[str]:

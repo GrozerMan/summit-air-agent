@@ -140,6 +140,13 @@ def test_co_mentions_that_are_not_an_alarm_or_symptoms(text):
         "there's a fire in the basement",
         "the outlet sparked",
         "the smoke alarm is going off",
+        # Still caught next to the everyday carve-outs below.
+        "I smell smoke",
+        "the furnace is smoking",
+        "it smells smoky in the basement",
+        "smoke coming from the fireplace into the room",
+        "there is a fire near the furnace",
+        "the fire alarm is going off",
     ],
 )
 def test_smoke_sparks_and_flames_are_caught(text):
@@ -165,6 +172,24 @@ def test_smoke_sparks_and_flames_are_caught(text):
         "No sparks, no smoke, nothing like that",
         "I haven't seen any smoke",
         "caller denies smoke or sparks",
+        # Everyday words that only look like fire. "Smoking hot" on a no-AC call made
+        # the call a permanent P0 and read the evacuation script to someone who was hot.
+        "the AC is out and it's smoking hot in here",
+        "it's smoking-hot upstairs",
+        "my husband smokes, could that be the smell",
+        "I smoke but never inside",
+        "smells like cigarette smoke in the vents",
+        "there was a fire in the fireplace and now the heat stopped",
+        "we had a fire going in the wood stove",
+        # Round-2 stress probes.
+        "Nothing's sparking right now, it just won't heat.",
+        "My fire alarm keeps chirping, and separately the AC needs a tune-up.",
+        "I live on Fire Island, can you do a furnace tune-up?",
+        "The burner flames look nice and blue, but the blower is loud.",
+        "It clicks and sparks but won't light, and the heat's off.",
+        "First time running the heat this year and it smells a bit smoky, like burnt dust.",
+        "Can you do the smoke test on my ducts?",
+        "My neighbor's house had a fire last year so I want my furnace checked.",
     ],
 )
 def test_hvac_fire_words_and_denials_do_not_fire(text):
@@ -215,7 +240,9 @@ def test_leaving(text):
     assert leaving(text)
 
 
-@pytest.mark.parametrize("text", ["I can't leave, my mom is in a wheelchair", "what do I do", "Should I leave?"])
+@pytest.mark.parametrize(
+    "text", ["I can't leave, my mom is in a wheelchair", "what do I do", "Should I leave?"]
+)
 def test_not_leaving(text):
     assert not leaving(text)
 
@@ -223,3 +250,57 @@ def test_not_leaving(text):
 def test_hotline_is_spelled_for_tts():
     assert say_hotline("1-800-490-0045") == "one, eight hundred, four nine zero, zero zero four five"
     assert say_hotline("1-800-752-6633") == "one, eight hundred, seven five two, six six three three"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # The agent asks "any gas smell right now?" and the answer is a plain no.
+        "No, I don't smell gas right now.",
+        "No, I don't smell any gas at the moment, it's just cold.",
+        "This furnace is giving me a headache, it keeps short cycling.",
+    ],
+)
+def test_plain_answers_and_figures_of_speech_do_not_fire(text):
+    assert hazard_in(text) is None
+
+
+@pytest.mark.parametrize(
+    "text, hazard",
+    [
+        ("there's like a sewer smell coming from the furnace room", "gas"),
+        ("the pilot light went out and now there's a weird smell", "gas"),
+        ("my carbon monoxide detector says 'CO' and is beeping", "co"),
+        ("the CO thing on the wall keeps going off", "co"),
+    ],
+)
+def test_round_two_misses_are_caught(text, hazard):
+    assert hazard_in(text) == hazard
+
+
+def test_one_persons_flu_is_not_co_but_a_sick_household_still_is():
+    assert hazard_in("I've had the flu, headache and dizzy all week, and now the AC died.") is None
+    # CO poisoning is classically mistaken for a family-wide flu: this stays P0 on purpose.
+    assert (
+        hazard_in("The heat's out and the kids have a stomach bug, they've been throwing up all night.")
+        == "co"
+    )
+
+
+@pytest.mark.parametrize(
+    "text, hazard",
+    [
+        # Live round 3: a listed denial made the call a fire emergency.
+        ("No, I don't notice any smells, smoke, or alarms.", None),
+        ("No smells, no smoke, nothing.", None),
+        ("nothing like gas, smoke or sparks", None),
+        ("No gas, smoke or sparks, it just stopped", None),
+        # ...but a new statement after the comma is not part of the denial.
+        ("No, smoke is coming out of the vent", "fire"),
+        ("I don't smell gas, smoke is coming from the unit", "fire"),
+        ("There are no smells, but sparks came out of the outlet", "fire"),
+        ("No, it smells like gas", "gas"),
+    ],
+)
+def test_a_denial_covers_its_list_and_nothing_after_it(text, hazard):
+    assert hazard_in(text) == hazard

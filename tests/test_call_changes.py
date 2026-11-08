@@ -24,7 +24,7 @@ BOOK = dict(
 def offered_tune_up(call, zip_code="11706"):
     call.assess_situation(Facts(request_type="tune_up", description="tune-up"))
     call.check_service_address(zip_code=zip_code, property_type="house")
-    call.find_appointment_options()
+    call.find_appointment_options(caller_says_member=False)
     call.agent_said += f" That's {BOOK['phone']}, at {BOOK['address']}. Right?"
     return dict(call.offered)
 
@@ -103,7 +103,9 @@ def test_gas_after_booking_puts_the_booking_on_hold_and_says_so(make_call, seede
 
     row = seeded.get_appointment(appointment_id)
     assert row.status == "on_hold" and row.priority == Priority.P0
-    notes = seeded.conn.execute("SELECT notes FROM appointments WHERE id = ?", (appointment_id,)).fetchone()[0]
+    notes = seeded.conn.execute("SELECT notes FROM appointments WHERE id = ?", (appointment_id,)).fetchone()[
+        0
+    ]
     assert notes.startswith("ON HOLD")
     alert = seeded.alerts_for_call(call.call_id)[-1]
     assert alert["severity"] == "critical" and f"#{appointment_id}" in alert["summary"]

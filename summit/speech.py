@@ -8,23 +8,48 @@ _DIGIT_WORDS = {
 }  # fmt: skip
 
 _MULTIPLIERS = {"double": 2, "triple": 3}
+_TEENS = {
+    "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14", "fifteen": "15",
+    "sixteen": "16", "seventeen": "17", "eighteen": "18", "nineteen": "19",
+}  # fmt: skip
+_TENS = {
+    "twenty": "2", "thirty": "3", "forty": "4", "fifty": "5", "sixty": "6", "seventy": "7", "eighty": "8",
+    "ninety": "9",
+}  # fmt: skip
+_UNITS = {k: v for k, v in _DIGIT_WORDS.items() if v != "0"}
+# "516 555 0142, no wait, 0124": what comes after one of these replaces the end.
+_CORRECTION = re.compile(
+    r"\b(?:no\s+wait|wait\s+no|i\s+mean|sorry|actually|correction|scratch\s+that)\b", re.I
+)
 
 
 def spoken_digits(text: str) -> str:
-    """Pull the digits out of something like "five one six, five five five, oh one four two".
+    """Pull the digits out of something like "five one six, five fifty-five, oh one four two".
 
-    STT usually gives digits already, but callers say "oh" and "double five", and
-    the transcript keeps those as words often enough to be worth handling.
+    STT usually gives digits already, but callers say "oh", "double five" and
+    "fifty-five", and the transcript keeps those as words often enough to matter.
     """
     digits: list[str] = []
     repeat = 1
-    for token in re.findall(r"[a-z]+|\d", text.lower()):
+    tokens = re.findall(r"[a-z]+|\d", text.lower())
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        i += 1
         if token in _MULTIPLIERS:
             repeat = _MULTIPLIERS[token]
             continue
-        digit = token if token.isdigit() else _DIGIT_WORDS.get(token)
-        if digit is not None:
-            digits.extend(digit * repeat)
+        if token in _TENS:
+            # "fifty-five" is 55, a bare "fifty" is 50.
+            unit = _UNITS.get(tokens[i]) if i < len(tokens) else None
+            group = _TENS[token] + (unit or "0")
+            i += 1 if unit else 0
+        elif token == "hundred" and digits:
+            group = "00"  # "eight hundred"
+        else:
+            group = token if token.isdigit() else _TEENS.get(token) or _DIGIT_WORDS.get(token)
+        if group is not None:
+            digits.extend(group * repeat)
         repeat = 1
     return "".join(digits)
 
@@ -34,6 +59,14 @@ def normalize_phone(text: str | None) -> str | None:
     if not text:
         return None
     digits = spoken_digits(text)
+    parts = _CORRECTION.split(text)
+    if len(parts) > 1 and len(digits) > 11:
+        # "516 555 0142, no wait, 0124": the correction replaces the end of the number.
+        before, after = spoken_digits(" ".join(parts[:-1])), spoken_digits(parts[-1])
+        if len(after) >= 10:
+            digits = after
+        elif after and len(before) >= 10:
+            digits = before[-10:][: 10 - len(after)] + after
     if len(digits) == 11 and digits.startswith("1"):
         digits = digits[1:]
     if len(digits) != 10 or digits[0] in "01":

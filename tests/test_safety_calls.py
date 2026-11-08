@@ -56,7 +56,9 @@ def test_sparks_reported_in_the_past_reach_p0_without_the_model(make_call, seede
 
 def test_sparks_in_the_models_description_reach_p0(make_call):
     call = make_call(None)
-    call.assess_situation(Facts(no_cooling=True, description="AC unit was sparking earlier, trips the breaker"))
+    call.assess_situation(
+        Facts(no_cooling=True, description="AC unit was sparking earlier, trips the breaker")
+    )
     assert call.priority == Priority.P0
 
 
@@ -65,7 +67,7 @@ def test_a_words_only_p0_offers_the_office_callback(make_call):
     call.screen_caller_turn("There's a skunk smell by the furnace.")
     assert call.hazard_from_words_only
     with pytest.raises(ActionRefused, match="offer a callback from the office"):
-        call.find_appointment_options()
+        call.find_appointment_options(caller_says_member=False)
     assert "request_callback" in call.emergency_note()
     # The callback itself is allowed on a P0 call.
     assert call.request_callback("631-555-0100", "wants a furnace visit; said there's no gas").startswith(
@@ -79,7 +81,7 @@ def test_a_p0_the_model_confirms_is_not_words_only(make_call):
     call.assess_situation(Facts(gas_smell=True, description="skunk smell by the furnace"))
     assert call.priority == Priority.P0 and not call.hazard_from_words_only
     with pytest.raises(ActionRefused) as refused:
-        call.find_appointment_options()
+        call.find_appointment_options(caller_says_member=False)
     assert "callback" not in str(refused.value)
 
 
@@ -106,3 +108,46 @@ def test_cant_leave_after_saying_bye_gets_the_fixed_answer(make_call):
     call.screen_caller_turn("okay bye", said_so_far=script)
     answer = call.screen_caller_turn("wait, I can't leave, my mom is in a wheelchair", said_so_far=script)
     assert "hang up and call nine-one-one" in answer and not call.caller_leaving
+
+
+def test_a_place_the_caller_is_at_in_the_next_sentence_names_the_utility(make_call):
+    script = make_call(None).screen_caller_turn("I smell gas. I'm in Yonkers.")
+    assert "Con Edison" in script
+
+
+def test_a_zip_read_digit_by_digit_names_the_utility(make_call):
+    script = make_call(None).screen_caller_turn("There's a gas smell at my place, 1 0 7 0 1")
+    assert "Con Edison" in script
+
+
+def test_where_the_caller_is_beats_caller_id(make_call):
+    # Dana lives in Nassau (National Grid) but is calling about her rental in Yonkers.
+    from summit.seed import DEMO_MEMBER_PHONE
+
+    script = make_call(DEMO_MEMBER_PHONE).screen_caller_turn(
+        "Yes, it's Dana. I'm at my rental in Yonkers, 10701, and I smell gas."
+    )
+    assert "Con Edison" in script
+
+
+def test_of_two_places_the_one_the_caller_is_at_wins(make_call):
+    script = make_call(None).screen_caller_turn(
+        "My mom in Huntington is fine but I'm in Yonkers and I smell gas"
+    )
+    assert "Con Edison" in script
+
+
+def test_nyc_borough_gets_its_utility_and_queens_stays_generic(make_call):
+    assert "National Grid at seven one eight" in make_call(None).screen_caller_turn(
+        "I smell gas in Park Slope"
+    )
+    assert "your gas company" in make_call(None).screen_caller_turn("I smell gas, I'm in Astoria")
+
+
+def test_where_a_verified_caller_says_they_are_beats_the_address_on_file(make_call):
+    from summit.seed import DEMO_MEMBER_PHONE
+
+    call = make_call(DEMO_MEMBER_PHONE)
+    call.lookup_customer(confirmed_name=True)  # Dana's home is in Nassau
+    script = call.screen_caller_turn("I'm at my rental in Yonkers, 10701, and I smell gas.")
+    assert "Con Edison" in script

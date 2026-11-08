@@ -8,6 +8,7 @@ Uses evals.harness.run_persona unchanged; only the loop around it differs from e
 import argparse
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -17,7 +18,7 @@ load_dotenv(".env.local")
 from evals.harness import run_persona  # noqa: E402
 from evals.personas import BY_NAME, PERSONAS  # noqa: E402
 
-OUT = Path(__file__).parent / "runs" / "evals_repeat3"
+OUT = Path(os.getenv("STRESS_RUNS", str(Path(__file__).parent / "runs"))) / "evals_repeat3"
 LIMITED = ("429", "rate limit", "QuotaStatusExceeded")
 
 

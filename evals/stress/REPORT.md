@@ -13,7 +13,7 @@ SQLite file in `evals/stress/runs/db/`, and every pass/fail below is read from t
 | Grader audit | `evals/stress/grader_audit.py` + `scratch_broken.sh` | 4 handcrafted wrong agents + 2 broken builds |
 | Unit tests | `uv run pytest` | 171 passed |
 
-Re-run any of it: `bash evals/stress/run_live2.sh` (paced: LiveKit Inference caps requests per minute; see H6),
+Re-run any of it: `bash evals/stress/run_live.sh` (since consolidated; paced: LiveKit Inference caps requests per minute; see H6),
 or `uv run python -m evals.stress.drive <scenario> --repeat 3 --parallel 1`.
 Each scenario's transcripts, tool calls (arguments and results) and DB rows are in `evals/stress/runs/<scenario>.md`.
 
@@ -423,5 +423,5 @@ Each of these was attacked directly and didn't break.
 - `evals/stress/nolock_probe.py`: shows the booking lock is necessary
 - `evals/stress/grader_audit.py`, `scratch_broken.sh`: section 10
 - `evals/stress/run_evals_paced.py`: `evals.run` with pacing/retry and a flakiness table → `runs/evals_repeat3.md`
-- `evals/stress/run_live.sh`, `run_live2.sh`: everything in one go (use `run_live2.sh`; it's paced)
+- `evals/stress/run_live.sh`: everything in one go, paced (the round-1 and round-2 scripts were merged into it)
 - `evals/stress/runs/`: per-scenario transcripts + DB rows, `summary.json`, `progress.log`, `db/*.db`

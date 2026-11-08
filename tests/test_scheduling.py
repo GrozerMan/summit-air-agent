@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta
 
 from conftest import TUESDAY_10AM, TZ
 
+from summit import config
 from summit.models import Pool, Priority
 from summit.scheduling import Scheduler, say_window, window_bounds
 
@@ -109,3 +110,15 @@ def test_window_phrasing():
     assert say_window("10:00-12:00") == "between 10 AM and noon"
     assert say_window("12:00-14:00") == "between noon and 2 PM"
     assert say_window("16:00-18:00") == "between 4 and 6 PM"
+
+
+def test_routine_work_skips_thanksgiving(cfg, seeded):
+    wed_3pm = datetime(2026, 11, 25, 15, 0, tzinfo=TZ)
+    options = Scheduler(seeded, cfg).find_options("Nassau", Priority.P3, False, wed_3pm, limit=10)
+    assert options and all(o.day.isoformat() != "2026-11-26" for o in options)
+
+
+def test_the_office_is_closed_on_a_holiday(cfg):
+    thanksgiving_noon = datetime(2026, 11, 26, 12, 0, tzinfo=TZ)
+    assert not config.office_open(cfg, thanksgiving_noon)
+    assert config.next_office_opening(cfg, thanksgiving_noon).day == 27

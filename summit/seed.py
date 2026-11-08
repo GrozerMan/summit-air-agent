@@ -6,6 +6,7 @@ The member is you: call from that phone and the agent greets you by name.
 """
 
 import argparse
+import os
 from datetime import date, datetime, timedelta
 
 from summit import config
@@ -72,7 +73,9 @@ def _next_weekday(day: date) -> date:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Load demo customers into data/summit.db")
+    parser = argparse.ArgumentParser(
+        description="Load demo customers (into DATABASE_URL if set, else data/summit.db)"
+    )
     parser.add_argument("--member-phone", default=DEMO_MEMBER_PHONE, help="your cell, e.g. +15165550142")
     parser.add_argument("--member-name", default="Dana Reyes")
     parser.add_argument("--reset", action="store_true", help="delete the existing database first")
@@ -82,16 +85,23 @@ def main() -> None:
     if phone is None:
         parser.error(f"{args.member_phone} isn't a US phone number")
 
-    path = config.db_path()
-    if args.reset:
-        for suffix in ("", "-wal", "-shm"):
-            path.with_name(path.name + suffix).unlink(missing_ok=True)
-
-    store = Store(path)
+    if os.getenv("DATABASE_URL"):
+        store = Store()
+        where = "the DATABASE_URL database"
+        if args.reset:
+            store.drop_all()
+            store = Store()
+    else:
+        path = config.db_path()
+        where = str(path)
+        if args.reset:
+            for suffix in ("", "-wal", "-shm"):
+                path.with_name(path.name + suffix).unlink(missing_ok=True)
+        store = Store(path)
     if store.conn.execute("SELECT count(*) FROM customers").fetchone()[0]:
         parser.error("database already has customers; pass --reset to start over")
     seed(store, phone, args.member_name)
-    print(f"Seeded {path}. Call from {phone} to be greeted as {args.member_name.split()[0]}.")
+    print(f"Seeded {where}. Call from {phone} to be greeted as {args.member_name.split()[0]}.")
 
 
 if __name__ == "__main__":

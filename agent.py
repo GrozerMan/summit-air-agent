@@ -9,10 +9,13 @@ eligibility, availability, price) comes back from summit/ through the tools belo
 """
 
 import asyncio
+import inspect
 import logging
 import os
+import re
 import uuid
 from collections.abc import AsyncIterable, Awaitable, Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +40,9 @@ from livekit.agents.beta import EndCallTool
 from livekit.plugins import krisp
 
 from summit import config
-from summit.backend import ActionRefused, CallSession, caller_turn_to_screen
+from summit.backend import ActionRefused, CallSession, caller_turn_to_screen, close_abandoned_calls
+from summit.call_metrics import CallMetrics
+from summit.claims import booking_claims, callback_claims
 from summit.notify import Notifier
 from summit.store import Store
 from summit.triage import Facts
@@ -46,9 +51,10 @@ load_dotenv(".env.local")
 
 logger = logging.getLogger("summit-air")
 
-# Must match the agent name in the LiveKit dispatch rule for the phone number.
-AGENT_NAME = "summit-air"
-PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text()
+# Must match the agent name in the LiveKit dispatch rule for the phone number. A laptop
+# worker should set AGENT_NAME=summit-air-dev so it never takes calls meant for the deploy.
+AGENT_NAME = os.getenv("AGENT_NAME", "summit-air")
+PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text().strip()
 
 CHECK_INS = ["Are you still there?", "Sorry, I can't hear you. If you're still there, just say something."]
 SILENT_GOODBYE = "I'll let you go for now. If you still need us, call back any time. Goodbye."
@@ -66,11 +72,24 @@ def build_llm() -> llm.LLM:
 
 def instructions_for(call: CallSession) -> str:
     now = call.now()
-    office = "open" if config.office_open(call.cfg, now) else "closed"
     time_of_day = now.strftime("%I:%M %p").lstrip("0")
-    return (
-        f"{PROMPT}\n\n## Right now\nIt's {now:%A}, {now:%B} {now.day}, {time_of_day}. The office is {office}."
+    if config.office_open(call.cfg, now):
+        office = "The office is open."
+    else:
+        # Stress finding H12: told only "the office is closed", the model invented "we don't do
+        # night service" before triage, and a caller with a real P1 might hang up.
+        office = (
+            "The office is closed, but urgent problems are still handled: find out what's wrong first "
+            "and let the tools say when someone can come."
+        )
+    number, _ = call.plan_transfer()
+    # H7: the model said "I'll connect you" before the transfer tool answered.
+    transfer = (
+        "A live transfer to the office is possible right now (transfer_to_human)."
+        if number
+        else "There's no live transfer to a person right now: if they want one, offer a callback from the office."
     )
+    return f"{PROMPT}\n\n## Right now\nIt's {now:%A}, {now:%B} {now.day}, {time_of_day}. {office} {transfer}"
 
 
 class SummitAgent(Agent):
@@ -106,8 +125,13 @@ class SummitAgent(Agent):
             if fixed:
                 return _speak(fixed)
         else:
-            # The turn right after a tool. A booking or a move just went through, so the
-            # confirmation is spoken from the booking record instead of worded by the model.
+            # The turn right after a tool. A hazard only the model reported has just made the
+            # call P0: the script is spoken as fixed text, as on the word-screen path.
+            script = self.call.unsaid_safety_script(said)
+            if script:
+                return _speak(script)
+            # Or a booking or a move just went through: the confirmation is spoken from the
+            # booking record instead of worded by the model.
             confirmation = self.call.take_announcement()
             if confirmation:
                 return _speak(confirmation)
@@ -116,7 +140,64 @@ class SummitAgent(Agent):
         if note:
             chat_ctx = chat_ctx.copy()
             chat_ctx.add_message(role="system", content=note)
-        return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+        return self._hold_back_false_claims(Agent.default.llm_node(self, chat_ctx, tools, model_settings))
+
+    async def _hold_back_false_claims(self, stream: Any) -> AsyncIterable[Any]:
+        """The model's reply, a sentence at a time, minus any sentence claiming a booking or a
+        callback the records don't show. In a live run the agent read the details back, heard
+        "yes", and said "you're booked" without calling book_appointment again. The hang-up check
+        caught it, but the caller had already heard it. Now the sentence is never spoken: the
+        caller hears that we're putting it through, and the model is sent back to the tool."""
+        if inspect.isawaitable(stream):
+            stream = await stream
+        held: list[str] = []
+        pending = ""
+
+        def checked(sentence: str) -> str | None:
+            if booking_claims(sentence) and not self.call.has_booking():
+                held.append(sentence.strip())
+                return None
+            if callback_claims(sentence) and not self.call.callbacks:
+                held.append(sentence.strip())
+                return None
+            return sentence
+
+        async for chunk in stream:
+            if isinstance(chunk, str):
+                text = chunk
+            elif isinstance(chunk, llm.ChatChunk) and chunk.delta and chunk.delta.content:
+                text = chunk.delta.content
+                if chunk.delta.tool_calls:
+                    yield llm.ChatChunk(
+                        id=chunk.id,
+                        delta=llm.ChoiceDelta(role=chunk.delta.role, tool_calls=chunk.delta.tool_calls),
+                        usage=chunk.usage,
+                    )
+            else:
+                yield chunk  # tool calls, usage, flush markers: untouched
+                continue
+            pending += text
+            # Speak each finished sentence as soon as it's checked.
+            while match := re.search(r"[.!?](?:\s+|$)(?=\S)", pending):
+                sentence, pending = pending[: match.end()], pending[match.end() :]
+                if (ok := checked(sentence)) is not None:
+                    yield ok
+        if pending and (ok := checked(pending)) is not None:
+            yield ok
+        if held:
+            self.call.note("held back an unbacked claim: " + " | ".join(held)[:200])
+            logger.warning("held back unbacked claim: %s", held)
+            yield " One moment while I put that through."
+            try:
+                self.session.generate_reply(
+                    instructions=(
+                        "You were about to tell the caller something was booked or arranged, but no tool has "
+                        "confirmed it. Call book_appointment (or request_callback) now with the details they "
+                        "confirmed, and say only what the tool returns."
+                    )
+                )
+            except RuntimeError:
+                pass  # not in a live session (tests)
 
     def _run(self, tool: str, args: dict[str, Any], action: Callable[[], str]) -> str:
         try:
@@ -215,28 +296,40 @@ class SummitAgent(Agent):
         zip_code: str | None = None,
         town: str | None = None,
         property_type: str | None = None,
+        heat_from_building: bool | None = None,
     ) -> str:
         """Check the address where the work is: that we serve it and that it's a home.
 
         Args:
             zip_code: ZIP code of the service address.
-            town: Town of the service address, if they don't know the ZIP or the tool asks for it.
+            town: Town, neighborhood or borough, if they don't know the ZIP or the tool asks for it.
             property_type: What the property is, in their words: house, condo, two-family, restaurant...
+            heat_from_building: For an apartment, condo or co-op: True if the heat or cooling comes from
+                the building's own system (a boiler for the whole building), False if it's their own unit.
         """
-        args = dict(zip_code=zip_code, town=town, property_type=property_type)
+        args = dict(
+            zip_code=zip_code, town=town, property_type=property_type, heat_from_building=heat_from_building
+        )
         return self._run("check_service_address", args, lambda: self.call.check_service_address(**args))
 
     @function_tool
     async def find_appointment_options(
-        self, context: RunContext, reschedule_appointment_id: int | None = None
+        self,
+        context: RunContext,
+        reschedule_appointment_id: int | None = None,
+        caller_says_member: bool | None = None,
     ) -> str:
         """Get arrival windows to offer. For a new visit, call it after assess_situation and
         check_service_address. To move an existing appointment, pass its id.
 
         Args:
             reschedule_appointment_id: The id of the appointment being moved, if rescheduling.
+            caller_says_member: For a caller who isn't verified: their answer when asked whether
+                they're already a member. Leave empty until you've asked.
         """
-        args = dict(reschedule_appointment_id=reschedule_appointment_id)
+        args = dict(
+            reschedule_appointment_id=reschedule_appointment_id, caller_says_member=caller_says_member
+        )
         return self._run("find_appointment_options", args, lambda: self.call.find_appointment_options(**args))
 
     @function_tool
@@ -253,6 +346,8 @@ class SummitAgent(Agent):
         notes: str,
         phone_read_back_confirmed: bool,
         address_read_back_confirmed: bool,
+        equipment: str | None = None,
+        access_notes: str | None = None,
     ) -> str:
         """Book the window the caller chose. Before calling, read the phone number back digit
         by digit and the full address back, and hear them confirm both.
@@ -270,12 +365,16 @@ class SummitAgent(Agent):
                 The backend checks that you actually said it.
             address_read_back_confirmed: You read the address back out loud and they said it's right.
                 The backend checks that you actually said it.
+            equipment: The system, if they know: furnace, boiler, heat pump, central AC, mini-split; gas,
+                oil or electric; roughly how old.
+            access_notes: How the technician gets in: apartment number, gate or door code, pets, parking.
         """
         args = dict(
             option_id=option_id, first_name=first_name, last_name=last_name, phone=phone,
             address=address, zip_code=zip_code, job_type=job_type, notes=notes,
             phone_read_back_confirmed=phone_read_back_confirmed,
             address_read_back_confirmed=address_read_back_confirmed,
+            equipment=equipment, access_notes=access_notes,
         )  # fmt: skip
         return self._run("book_appointment", args, lambda: self.call.book_appointment(**args))
 
@@ -289,6 +388,16 @@ class SummitAgent(Agent):
         """
         args = dict(appointment_id=appointment_id, option_id=option_id)
         return self._run("change_appointment", args, lambda: self.call.change_appointment(**args))
+
+    @function_tool
+    async def cancel_appointment(self, context: RunContext, appointment_id: int) -> str:
+        """Cancel one of a verified caller's upcoming appointments, once they've said they want it cancelled.
+
+        Args:
+            appointment_id: The appointment to cancel.
+        """
+        args = dict(appointment_id=appointment_id)
+        return self._run("cancel_appointment", args, lambda: self.call.cancel_appointment(**args))
 
     @function_tool
     async def request_callback(
@@ -396,6 +505,10 @@ server = AgentServer()
 async def entrypoint(ctx: JobContext) -> None:
     cfg = config.load()
     store = Store()
+    try:
+        close_abandoned_calls(store, cfg, datetime.now(config.timezone(cfg)))
+    except Exception:
+        logger.exception("couldn't close abandoned calls")  # never worth failing a live call over
     call_id = uuid.uuid4().hex[:12]
     ctx.log_context_fields = {"room": ctx.room.name, "call_id": call_id}
 
@@ -431,6 +544,9 @@ async def entrypoint(ctx: JobContext) -> None:
         user_away_timeout=cfg["silence"]["check_in_seconds"],
     )
 
+    call_metrics = CallMetrics()
+    session.on("metrics_collected", lambda event: call_metrics.add(event.metrics))
+
     # The session's close event and the job's shutdown can both fire; finalize once.
     finished = False
 
@@ -438,6 +554,8 @@ async def entrypoint(ctx: JobContext) -> None:
         nonlocal finished
         if not finished:
             finished = True
+            call.metrics = call_metrics.summary()
+            logger.info("call metrics: %s", call.metrics)
             call.finalize(transcript_of(session.history))
 
     def save_transcript(_event: Any) -> None:

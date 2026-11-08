@@ -7,13 +7,16 @@ requires-python = ">=3.11"
 dependencies = [
     "livekit-agents~=1.8.9",
     "livekit-plugins-krisp>=0.4.9,<0.5",  # versioned separately from livekit-agents
+    "psycopg[binary]>=3.2,<4",
     "python-dotenv>=1.0",
 ]
 
 [dependency-groups]
 dev = [
+    "pgserver>=0.1.4",
     "pytest>=8",
     "pytest-asyncio>=0.24",
+    "ruff>=0.8",
 ]
 
 [tool.pytest.ini_options]
@@ -27,3 +30,14 @@ markers = ["eval: runs the live model; needs LiveKit credentials (uv run pytest 
 [tool.ruff]
 line-length = 110
 target-version = "py311"
+extend-exclude = ["* 2.py"]  # iCloud conflict copies, not code
+
+[tool.ruff.lint]
+# Errors, imports, bugbear and pyupgrade. Not the newer opinionated sets (re.I vs
+# re.IGNORECASE, dict() vs {}), which would churn the whole repo for nothing.
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+ignore = ["B023"]  # closures in test loops are called immediately
+
+[tool.ruff.lint.per-file-ignores]
+# One-off stress probes, kept as written when the findings were made.
+"evals/stress/**" = ["E70", "E731", "E741", "F841", "B905", "I001"]

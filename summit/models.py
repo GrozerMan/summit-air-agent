@@ -3,6 +3,10 @@ from datetime import date
 from enum import IntEnum, StrEnum
 
 
+class ActionRefused(Exception):
+    """The backend won't do what the model asked. The message says what's missing."""
+
+
 class Priority(IntEnum):
     """Lower is more urgent, so `min()` picks the more serious of two priorities."""
 
@@ -43,6 +47,12 @@ class Customer:
     @property
     def full_name(self) -> str:
         return f"{self.first_name} {self.last_name}"
+
+    def membership_on(self, day: date) -> Membership:
+        """An "active" membership past its expiry date is lapsed, whatever the row says."""
+        if self.membership == Membership.ACTIVE and self.membership_expires and self.membership_expires < day:
+            return Membership.LAPSED
+        return self.membership
 
 
 @dataclass

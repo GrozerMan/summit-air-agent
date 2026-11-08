@@ -94,9 +94,11 @@ def test_two_calls_moving_the_same_appointment_move_it_once(tmp_path, run):
         t.start()
     for t in threads:
         t.join()
-    booked = Store(path).conn.execute(
-        "SELECT count(*) FROM appointments WHERE customer_id = 1 AND status = 'booked'"
-    ).fetchone()[0]
+    booked = (
+        Store(path)
+        .conn.execute("SELECT count(*) FROM appointments WHERE customer_id = 1 AND status = 'booked'")
+        .fetchone()[0]
+    )
     assert booked == 1 and sorted(outcomes) == ["moved", "refused"]
 
 
@@ -138,3 +140,10 @@ def _appointment(call_id):
         customer_id=1, call_id=call_id, job_type="tune-up", priority=Priority.P3,
         service_address="x", contact_name="x", contact_phone="+15165550000",
     )  # fmt: skip
+
+
+def test_on_postgres_a_four_way_race_has_one_winner(pg_uri):
+    # The deployed agent runs on Postgres, where the lock is an advisory lock, not BEGIN IMMEDIATE.
+    from conftest import fresh_postgres
+
+    assert _race_for_last_seat(fresh_postgres(pg_uri), racers=4) == 1

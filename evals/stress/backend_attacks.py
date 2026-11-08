@@ -63,7 +63,7 @@ def refused(fn, *a, **kw) -> tuple[bool, str]:
 
 
 def first_option(call: CallSession) -> str:
-    text = call.find_appointment_options()
+    text = call.find_appointment_options(caller_says_member=False)
     # The read-back the agent would say before booking; the backend now checks it was said (H5).
     # Probes that test a missing read-back clear this afterwards.
     call.agent_said += (
@@ -234,7 +234,7 @@ def identity() -> None:
     # Unlimited ZIP guessing.
     call = new_call("+12125550000")
     attempts = 0
-    for z in CFG["service_area"]["zips"]["Nassau"]:
+    for z in [z for z, c in CFG["service_area"]["zips"].items() if c == "Nassau"]:
         attempts += 1
         refused(call.lookup_customer, phone="5165550142", zip_code=z)
         if call.customer:
@@ -306,18 +306,19 @@ TOWNS_ONLY = ["East Meadow", "Merrick", "Bellmore", "Syosset", "Port Washington"
 def service_area() -> None:
     for z, town in REAL_NASSAU_ZIPS.items():
         first = check_zip(z, CFG)
-        second = check_town(town, CFG, zip_code=z) if first.ask_town else first
+        second = check_town(town, CFG, zip_code=z) if first.ask_zip else first
         record("4 area", f"{town} ({z}, Nassau) is accepted", second.in_area,
-               f"check_zip: ask_town={first.ask_town}; then check_town('{town}') -> in_area={second.in_area}, "
+               f"check_zip: ask_zip={first.ask_zip}; then check_town('{town}') -> in_area={second.in_area}, "
                f"outside={second.outside}: {second.message[:90]!r}")
     for town in TOWNS_ONLY:
         c = check_town(town, CFG)
-        expect = town not in ("Port Chester", "Hastings-on-Hudson") or True
         record("4 area", f"town only: '{town}'", c.in_area, f"in_area={c.in_area} outside={c.outside} county={c.county}")
-    for z, label in [("11001", "Floral Park (spans Queens/Nassau)"), ("10467", "Bronx"), ("11215", "Brooklyn")]:
+    # The five boroughs are served since the NYC expansion; a New Jersey ZIP isn't.
+    for z, label, served in [("11001", "Floral Park (spans Queens/Nassau)", True), ("10467", "Bronx", True),
+                             ("11215", "Brooklyn", True), ("07302", "Jersey City NJ", False)]:
         c = check_zip(z, CFG)
-        record("4 area", f"{label} {z}", (z == "11001" and c.in_area) or (z != "11001" and c.outside),
-               f"in_area={c.in_area} ask_town={c.ask_town} outside={c.outside} county={c.county}")
+        record("4 area", f"{label} {z}", c.in_area if served else c.outside,
+               f"in_area={c.in_area} ask_zip={c.ask_zip} outside={c.outside} county={c.county}")
     for desc, want in [
         ("12-unit apartment building I own", "commercial"),
         ("the boiler for the whole apartment building", "commercial"),
@@ -440,7 +441,7 @@ def scheduling() -> None:
     call = new_call()
     call.assess_situation(Facts(request_type="tune_up", description="tune-up"))
     call.check_service_address(zip_code="11706", property_type="house")
-    call.find_appointment_options()
+    call.find_appointment_options(caller_says_member=False)
     late = max(call.offered.values(), key=lambda o: (o.day, o.window))
     call.assess_situation(Facts(no_heat=True, indoor_temp_f=52, vulnerable_occupant=True,
                                 description="actually the heat is out now, 52 inside, my mom is 90"))
@@ -469,9 +470,10 @@ def scheduling() -> None:
                hours <= 72, f"first P2 option {found[0].option_id} starts {hours:.0f}h out")
     else:
         call = new_call(store=store, call_id="p2full")
-        call.assess_situation(Facts(no_heat=True, indoor_temp_f=64, vulnerable_occupant=False, description="no heat"))
+        # No cooling, not no heat: no heat in November is P1 since the heating-season rule.
+        call.assess_situation(Facts(no_cooling=True, indoor_temp_f=80, vulnerable_occupant=False, description="AC out"))
         call.check_service_address(zip_code="11501", property_type="house")
-        out = call.find_appointment_options()
+        out = call.find_appointment_options(caller_says_member=False)
         record("5 scheduling", "P2 with no capacity in 72h -> refused/escalated, not offered day 5+",
                "dispatcher has been alerted" in out, f"no P2 option within 72h; find_appointment_options -> {out[:120]!r}")
 
@@ -637,10 +639,12 @@ def records() -> None:
     call = new_call("+16315550111")
     via_agent(call, "assess_situation", call.assess_situation, facts=Facts(no_heat=True, indoor_temp_f=55, description="no heat, 55 inside"))
     via_agent(call, "check_service_address", call.check_service_address, zip_code="11706", property_type="house")
-    # SIGKILL here: finalize() never runs.
+    # SIGKILL here: finalize() never runs. The next call to start runs the recovery (M2).
+    from summit.records import close_abandoned_calls
+    close_abandoned_calls(call.store, CFG, TUE_10AM + timedelta(minutes=45))
     row = call.store.get_call("stress")
     record("9 records", "worker killed mid-call: partial record saved AND the unbooked P1 still gets followed up",
-           row is not None and row["outcome"] is not None,
+           row is not None and row["outcome"] is not None and bool(call.store.callbacks_for_call("stress")),
            f"row saved: priority=P{row['priority']} outcome={row['outcome']} ended_at={row['ended_at']} "
            f"tools={len(row['record']['tools'])}; no callback, outcome stays NULL -> 'in progress' forever")
 

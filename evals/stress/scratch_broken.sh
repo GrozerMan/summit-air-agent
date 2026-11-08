@@ -6,12 +6,12 @@
 set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 PY="$REPO/.venv/bin/python"
-OUT="$REPO/evals/stress/runs"
+OUT="$REPO/${STRESS_RUNS:-evals/stress/runs}"
 mkdir -p "$OUT"
 for V in A B; do
   S="${TMPDIR:-/tmp}/summit-broken-$V"
   rm -rf "$S"; mkdir -p "$S"
-  (cd "$REPO" && tar --exclude=.venv --exclude=.git --exclude=data --exclude=evals/results --exclude=evals/stress/runs -cf - .) | (cd "$S" && tar -xf -)
+  (cd "$REPO" && tar --exclude=.venv --exclude=.git --exclude=data --exclude=evals/results --exclude=evals/stress/runs --exclude=evals/stress/runs_v2 --exclude=_to_delete -cf - .) | (cd "$S" && tar -xf -)
   mkdir -p "$S/data" "$S/evals/results"
   "$PY" - "$S" "$V" <<'PYEOF'
 import sys, pathlib
