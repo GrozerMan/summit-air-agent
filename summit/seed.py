@@ -79,6 +79,11 @@ def main() -> None:
     parser.add_argument("--member-phone", default=DEMO_MEMBER_PHONE, help="your cell, e.g. +15165550142")
     parser.add_argument("--member-name", default="Dana Reyes")
     parser.add_argument("--reset", action="store_true", help="delete the existing database first")
+    parser.add_argument(
+        "--sample-week",
+        action="store_true",
+        help="also add a labelled sample week of calls, for the owner's results board",
+    )
     args = parser.parse_args()
 
     phone = normalize_phone(args.member_phone)
@@ -102,6 +107,12 @@ def main() -> None:
         parser.error("database already has customers; pass --reset to start over")
     seed(store, phone, args.member_name)
     print(f"Seeded {where}. Call from {phone} to be greeted as {args.member_name.split()[0]}.")
+    if args.sample_week:
+        from summit.sample_week import add_sample_week
+
+        cfg = config.load()
+        count = add_sample_week(store, cfg, datetime.now(config.timezone(cfg)))
+        print(f"Added {count} sample calls (marked as sample data; --reset clears them).")
 
 
 if __name__ == "__main__":

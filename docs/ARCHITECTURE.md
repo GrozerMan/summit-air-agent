@@ -9,6 +9,7 @@
 | Business logic | Triage, eligibility, membership, scheduling, pricing, escalation, records | `summit/` (plain Python, no LLM) |
 | Configuration | Prices, hours, holidays, thresholds, capacity; every served ZIP | `config/business.toml`, `config/service_area.csv` |
 | Operations | Live board of calls, alerts, callbacks, bookings; Slack alerts | `dashboard/`, `summit/notify.py` |
+| Owner views | Results (calls, after hours, jobs, estimated revenue, cost per call), sales follow-ups, morning brief: read-only over the records, estimates from config | `summit/insights.py`, `summit/brief.py` |
 
 The LLM understands and talks. It never decides priority, availability,
 eligibility or price; those come back from tools as facts it must relay.
