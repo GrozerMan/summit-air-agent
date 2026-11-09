@@ -6,12 +6,21 @@ A mixin for CallSession; see summit/triage.py for the rules themselves.
 
 import re
 from collections.abc import Iterable
+from dataclasses import replace
 
 from summit import config
 from summit.hazard_words import cannot_leave, hazard_in, leaving
 from summit.models import ActionRefused, Priority
 from summit.service_area import area_name, check_zip, place_in, property_kind
-from summit.triage import EMERGENCY, Assessment, Facts, assess, cannot_leave_script, safety_script
+from summit.triage import (
+    EMERGENCY,
+    Assessment,
+    Facts,
+    assess,
+    cannot_leave_script,
+    insistence_only,
+    safety_script,
+)
 
 # A P0 that only the word list raised can be a false alarm ("I asked if it smells like
 # gas and she said no"). It stays P0: undoing an emergency is the riskier mistake. The
@@ -55,8 +64,19 @@ class TriageMixin:
         if self.area_from_file and facts.description and property_kind(facts.description) == "commercial":
             # "The AC at my restaurant": not the home on the account, so check the address again.
             self.area, self.property, self.area_from_file = None, "unknown", False
+        insistence = ""
+        if insistence_only(facts.urgent_reason):
+            facts = replace(facts, urgent_reason=None)
+            insistence = (
+                " urgent_reason ignored: how much the caller wants someone isn't a reason on its own. Use it "
+                "only for a specific fact that makes waiting unsafe (who is at risk and why, or what is being "
+                "damaged right now)."
+            )
         self.facts = self.facts.updated_with(facts)
         fresh = assess(self.facts, self.cfg, heard=self.heard, today=self.now().date())
+        return self._apply_assessment(fresh) + (insistence if self.priority != Priority.P0 else "")
+
+    def _apply_assessment(self, fresh: Assessment) -> str:
         previous = self.assessment
 
         if previous and previous.priority <= fresh.priority:

@@ -263,6 +263,7 @@ class SummitAgent(Agent):
         active_leak: bool | None = None,
         minor_drip: bool | None = None,
         request_type: str | None = None,
+        urgent_reason: str | None = None,
     ) -> str:
         """Report what the caller has described. Call it as soon as you know the problem and
         again whenever you learn something new. Leave anything you don't know empty; never guess.
@@ -287,13 +288,17 @@ class SummitAgent(Agent):
             active_leak: Water is actively leaking.
             minor_drip: A small drip only.
             request_type: For non-problems: tune_up, estimate, or other.
+            urgent_reason: Only if waiting a day or more would be unsafe for a reason none of the
+                fields above capture: the specific fact, in a few words ("water dripping onto the
+                electrical panel", "he's on oxygen and it's 88 inside"). How badly the caller wants
+                someone, or that they call it an emergency, is not a reason and is ignored.
         """
         args = dict(
             description=description, gas_smell=gas_smell, co_alarm_or_symptoms=co_alarm_or_symptoms,
             smoke_sparks_or_flames=smoke_sparks_or_flames, burning_smell_persistent=burning_smell_persistent,
             dusty_smell_first_use=dusty_smell_first_use, no_heat=no_heat, no_cooling=no_cooling,
             indoor_temp_f=indoor_temp_f, vulnerable_occupant=vulnerable_occupant, active_leak=active_leak,
-            minor_drip=minor_drip, request_type=request_type,
+            minor_drip=minor_drip, request_type=request_type, urgent_reason=urgent_reason,
         )  # fmt: skip
         return self._run("assess_situation", args, lambda: self.call.assess_situation(Facts(**args)))
 

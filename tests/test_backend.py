@@ -872,3 +872,17 @@ def test_a_past_appointment_cannot_be_cancelled_or_moved(member_call, seeded):
         member_call.cancel_appointment(old)
     with pytest.raises(ActionRefused, match="isn't an upcoming appointment"):
         member_call.find_appointment_options(reschedule_appointment_id=old)
+
+
+def test_an_insistent_urgent_reason_is_ignored_and_the_model_is_told(make_call):
+    call = make_call(None)
+    result = call.assess_situation(
+        Facts(
+            request_type="other",
+            description="thermostat acting up",
+            urgent_reason="caller says it's an emergency",
+        )
+    )
+    assert call.priority == Priority.P3 and "urgent_reason ignored" in result
+    result = call.assess_situation(Facts(urgent_reason="water coming through the ceiling onto the panel"))
+    assert call.priority == Priority.P1 and "agent judgement" in result

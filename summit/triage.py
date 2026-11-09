@@ -12,10 +12,14 @@ fired so the office can see why a call was rated the way it was.
         no heat with a vulnerable occupant or indoor temp at/below the threshold
         no cooling with a vulnerable occupant or indoor temp at/above the threshold
         persistent burning smell, active leak
+        a concrete reason waiting is unsafe that the fields above don't capture (urgent_reason):
+        the model's judgement can raise a call to P1, never lower one, and a caller's wish
+        for speed ("it's an emergency", "I need someone today") is not a reason
     P2  no heat or no cooling otherwise, minor drip
     P3  everything else: tune-ups, estimates, non-urgent repairs
 """
 
+import re
 from dataclasses import dataclass, field, fields, replace
 from datetime import date
 from typing import Any
@@ -41,6 +45,11 @@ class Facts:
     active_leak: bool | None = None
     minor_drip: bool | None = None
     request_type: str | None = None
+    # The one place the model's judgement reaches priority: a specific fact that makes
+    # waiting unsafe and that none of the fields above capture ("water coming through the
+    # ceiling onto the electrical panel", "he's on oxygen and it's 90 inside"). It can only
+    # raise a call to P1, and how badly the caller wants someone doesn't count.
+    urgent_reason: str | None = None
     description: str = ""
 
     def updated_with(self, newer: "Facts") -> "Facts":
@@ -72,6 +81,23 @@ class Facts:
 _STICKY = {"gas_smell", "co_alarm_or_symptoms", "smoke_sparks_or_flames"}
 
 
+# How much the caller wants it, rather than why waiting is unsafe. "Emergency
+# classification has a high bar": demanding, upset or insistent callers don't get the
+# reserve on that alone, or every caller who says "emergency" would.
+_INSISTENCE = re.compile(
+    r"\b(?:emergency|urgent(?:ly)?|asap|as soon as possible|right away|immediately|"
+    r"can'?t wait|cannot wait|won'?t wait|insist\w*|demand\w*|angry|upset|frustrat\w*|"
+    r"(?:wants?|needs?) (?:someone|somebody|a tech\w*|it fixed|it done) (?:today|now|tonight)|"
+    r"(?:wants?|needs?) (?:someone|somebody|a tech\w*) (?:out|here|over|to come))",
+    re.I,
+)
+
+
+def insistence_only(reason: str | None) -> bool:
+    """True when an urgent_reason is about speed wanted rather than a fact making waiting unsafe."""
+    return bool(reason and _INSISTENCE.search(reason))
+
+
 @dataclass
 class Assessment:
     priority: Priority
@@ -94,7 +120,8 @@ def assess(
     `today` turns on the heating-season rule; without it, triage is season-blind."""
     rules = cfg["triage"]
 
-    heard = set(heard or ()) | {hazard_in(facts.description)}
+    # A hazard put in the judgement field ("smoke coming out of the vents") is still a hazard.
+    heard = set(heard or ()) | {hazard_in(facts.description), hazard_in(facts.urgent_reason or "")}
     hazards = [
         ("gas", facts.gas_smell, "gas" in heard, "gas smell reported"),
         ("co", facts.co_alarm_or_symptoms, "co" in heard, "carbon monoxide alarm or symptoms"),
@@ -130,6 +157,8 @@ def assess(
         reasons.append("persistent burning smell")
     if facts.active_leak:
         reasons.append("active water leak")
+    if not reasons and facts.urgent_reason and not insistence_only(facts.urgent_reason):
+        reasons.append(f"agent judgement: {facts.urgent_reason.strip()}")
     if reasons:
         return Assessment(Priority.P1, reasons)
 

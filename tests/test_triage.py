@@ -150,3 +150,33 @@ def test_heating_season_wraps_the_new_year(cfg):
 
 def test_no_cooling_is_not_affected_by_the_season(cfg):
     assert assess(Facts(no_cooling=True, indoor_temp_f=80), cfg, today=JULY_9).priority == Priority.P2
+
+
+# The model's judgement: it can raise a call to P1 with a specific fact, never lower one,
+# and a caller's wish for speed isn't a fact.
+
+
+def test_a_concrete_reason_raises_a_routine_call_to_p1(cfg):
+    result = assess(
+        Facts(request_type="other", urgent_reason="water dripping onto the electrical panel"), cfg
+    )
+    assert result.priority == Priority.P1
+    assert result.reasons == ["agent judgement: water dripping onto the electrical panel"]
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "caller says it's an emergency",
+        "she needs someone out today",
+        "he is very upset and can't wait",
+        "caller insists it is urgent",
+        "wants a tech here ASAP",
+    ],
+)
+def test_insistence_is_not_a_reason(cfg, reason):
+    assert priority(cfg, request_type="other", urgent_reason=reason) == Priority.P3
+
+
+def test_a_hazard_in_the_reason_is_still_p0(cfg):
+    assert priority(cfg, request_type="other", urgent_reason="smoke coming out of the vents") == Priority.P0
