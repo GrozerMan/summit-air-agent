@@ -16,7 +16,8 @@ from summit.backend import CallSession
 
 TOOLS = [
     "lookup_customer", "assess_situation", "check_service_address", "find_appointment_options",
-    "book_appointment", "change_appointment", "request_callback", "transfer_to_human", "get_pricing",
+    "book_appointment", "change_appointment", "start_another_request", "request_callback",
+    "transfer_to_human", "get_pricing",
 ]  # fmt: skip
 
 
@@ -32,6 +33,7 @@ def test_every_tool_is_exposed(member_call):
         "check_service_address",
         "find_appointment_options",
         "book_appointment",
+        "start_another_request",
         "request_callback",
         "get_pricing",
     ],  # fmt: skip

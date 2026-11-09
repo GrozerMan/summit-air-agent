@@ -94,6 +94,15 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         # Response times and usage, filled in at hang-up (summit/call_metrics.py).
         self.metrics: dict[str, Any] = {}
 
+        # One call can carry more than one request: a second problem, or the same problem
+        # at a second address. Each finished request is archived here and the triage,
+        # address and offers start fresh; who the caller is carries over.
+        self.earlier_requests: list[dict[str, Any]] = []
+        self._request_booked_from = 0
+        self._request_callbacks_from = 0
+        # Customers created on this call by an unverified caller, by (phone, last name), so
+        # their second booking lands on the record their first one made.
+        self._created_customers: dict[tuple[str, str], int] = {}
         # Booking attempts refused in a row on this request. At the limit the office is
         # asked to call back and finish it, rather than the caller being stuck in a loop.
         self.booking_failures = 0
@@ -512,9 +521,10 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
 
         self._refuse_if_emergency()
         problems = []
-        if self.booked:
+        if len(self.booked) > self._request_booked_from:
             problems.append(
-                f"this call already booked appointment #{self.booked[-1]}; use change_appointment to move it"
+                f"this request already booked appointment #{self.booked[-1]}; use change_appointment to move "
+                "it, or start_another_request if it's a different problem or a different address"
             )
         if option is None or self.offered_for.get(option_id) is not None:
             problems.append(
@@ -664,6 +674,9 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         and let them move it. The office sees the possible match and merges if it's real."""
         if self.customer:
             return self.customer.id, False
+        made_here = self._created_customers.get((phone, last_name.strip().lower()))
+        if made_here:
+            return made_here, False
         existing = self.store.customers_by_phone(phone)
         if existing:
             names = ", ".join(f"#{c.id} {c.full_name}" for c in existing)
@@ -681,6 +694,7 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
             county,
             confirmed=not existing,
         )
+        self._created_customers[(phone, last_name.strip().lower())] = customer_id
         return customer_id, True
 
     def change_appointment(self, appointment_id: int, option_id: str) -> str:
@@ -785,6 +799,54 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         raise ActionRefused(
             "That window was just taken by another booking. Apologize, then offer these instead. "
             + alternatives
+        )
+
+    def start_another_request(self, reason: str) -> str:
+        """A second problem, or the same problem at another address, on the same call.
+
+        Only once the current request is settled (booked, a callback set, or turned away),
+        so it can't be used to start over on a request the backend refused, or to drop a
+        priority: priority never goes down within a request."""
+        self._refuse_if_emergency()
+        if self.assessment is None:
+            raise ActionRefused(
+                "Nothing has been assessed on this call yet: call assess_situation with the problem."
+            )
+        settled = (
+            len(self.booked) > self._request_booked_from
+            or len(self.callbacks) > self._request_callbacks_from
+            or self.outcome in ("out_of_area", "commercial_lead", "building_system")
+        )
+        if not settled:
+            raise ActionRefused(
+                "Finish the current request first: book it (book_appointment) or set a callback "
+                "(request_callback). If it's more about the same visit, put it in that booking's notes instead."
+            )
+        self.earlier_requests.append(
+            {
+                "priority": int(self.priority) if self.priority is not None else None,
+                "reasons": self.assessment.reasons,
+                "facts": self.facts.known(),
+                "service_area": {"county": self.area.county, "zip": self.area.zip} if self.area else None,
+                "property": self.property,
+                "appointments": self.booked[self._request_booked_from :],
+                "callbacks": self.callbacks[self._request_callbacks_from :],
+                "outcome": self.outcome,
+            }
+        )
+        self.facts = Facts()
+        self.assessment = None
+        self.area, self.area_from_file, self.property, self.building_system = None, False, "unknown", False
+        self._void_offers()
+        self.outcome = None
+        self.booking_failures, self.failure_callback_set = 0, False
+        self.caller_availability = None
+        self._request_booked_from, self._request_callbacks_from = len(self.booked), len(self.callbacks)
+        self.note(f"request {len(self.earlier_requests) + 1} on this call: {reason.strip()[:120]}")
+        return (
+            "New request started. Find out what's wrong (assess_situation), check the address for this one "
+            "(check_service_address; it may be a different place), then find times and book as before. Their "
+            "name and number carry over; read back anything new, like a different address."
         )
 
     # Escalation

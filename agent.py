@@ -431,6 +431,18 @@ class SummitAgent(Agent):
         return self._run("cancel_appointment", args, lambda: self.call.cancel_appointment(**args))
 
     @function_tool
+    async def start_another_request(self, context: RunContext, reason: str) -> str:
+        """The caller has a second, separate problem, or the same problem at another address,
+        after the first one is booked or set for a callback. Starts a fresh request on the
+        same call. Not for more detail about the visit just booked: that goes in its notes.
+
+        Args:
+            reason: What the new request is, in a few words.
+        """
+        args = dict(reason=reason)
+        return self._run("start_another_request", args, lambda: self.call.start_another_request(**args))
+
+    @function_tool
     async def request_callback(
         self, context: RunContext, phone: str, reason: str, urgent: bool = False, name: str | None = None
     ) -> str:

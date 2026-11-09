@@ -1,8 +1,8 @@
-"""Names read back, confirmation numbers, the caller's own availability, and the
-office taking over after repeated failed bookings."""
+"""Names read back, confirmation numbers, the caller's own availability, more than one
+request on a call, and the office taking over after repeated failed bookings."""
 
 import pytest
-from test_backend import GOOD_BOOKING, ready_to_book
+from test_backend import GOOD_BOOKING, read_back, ready_to_book
 
 from summit.backend import ActionRefused
 from summit.models import Priority
@@ -160,3 +160,78 @@ def test_a_success_resets_the_count(make_call):
             call.book_appointment(option, **{**GOOD_BOOKING, "phone_read_back_confirmed": False})
     call.book_appointment(option, **GOOD_BOOKING)
     assert call.booking_failures == 0
+
+
+# More than one request on a call
+
+
+def test_a_second_request_waits_until_the_first_is_settled(make_call):
+    call = make_call(None)
+    ready_to_book(call)
+    with pytest.raises(ActionRefused, match="Finish the current request"):
+        call.start_another_request("AC at the rental")
+
+
+def test_a_second_problem_at_another_address_books_too(make_call, seeded):
+    call = make_call(None)
+    option = ready_to_book(call)
+    call.book_appointment(option, **GOOD_BOOKING)
+    call.take_announcement()
+    with pytest.raises(ActionRefused, match="start_another_request"):
+        call.book_appointment(option, **GOOD_BOOKING)
+
+    call.start_another_request("tune-up at her mother's house in Bay Shore")
+    assert call.assessment is None and call.area is None and not call.offered
+    call.assess_situation(Facts(request_type="tune_up", description="tune-up"))
+    call.check_service_address(zip_code="11706", property_type="house")
+    call.find_appointment_options(caller_says_member=False)
+    read_back(call, address="33 Shore Road, Bay Shore")
+    second = {
+        **GOOD_BOOKING,
+        "address": "33 Shore Road, Bay Shore",
+        "zip_code": "11706",
+        "job_type": "tune-up",
+    }
+    assert call.book_appointment(next(iter(call.offered)), **second).startswith("Booked")
+
+    appointments = seeded.appointments_for_call("call-1")
+    assert len(appointments) == 2
+    # One new customer, not a "possible duplicate" of themselves.
+    assert appointments[0]["customer_id"] == appointments[1]["customer_id"]
+    call.save()
+    record = seeded.get_call("call-1")
+    # The call shows its most serious request and its booking, not just the last tune-up.
+    assert record["priority"] == int(Priority.P1) and record["outcome"] == "booked"
+    assert record["record"]["requests"][0]["appointments"] == [appointments[0]["id"]]
+    assert record["summary"].startswith("Request 1: P1")
+
+
+def test_an_unbooked_second_request_still_gets_a_callback(make_call, seeded):
+    call = make_call("+16315550123")
+    option = ready_to_book(call, facts=Facts(request_type="tune_up", description="tune-up"))
+    call.book_appointment(option, **GOOD_BOOKING)
+    call.start_another_request("no heat upstairs at the other house")
+    call.assess_situation(Facts(no_heat=True, vulnerable_occupant=True, description="no heat"))
+    call.finalize([])
+    callbacks = seeded.callbacks_for_call("call-1")
+    assert len(callbacks) == 1 and callbacks[0]["urgent"]
+    assert seeded.get_call("call-1")["outcome"] == "booked"
+
+
+def test_no_second_request_during_an_emergency(make_call):
+    call = make_call(None)
+    option = ready_to_book(call)
+    call.book_appointment(option, **GOOD_BOOKING)
+    call.screen_caller_turn("Oh, and I smell gas in the basement now.")
+    with pytest.raises(ActionRefused, match="safety emergency"):
+        call.start_another_request("something else")
+
+
+def test_turned_away_then_a_home_address_is_a_new_request(make_call):
+    call = make_call(None)
+    call.assess_situation(Facts(no_cooling=True, description="AC out at my restaurant"))
+    call.check_service_address(zip_code="11743", property_type="restaurant")
+    assert call.outcome == "commercial_lead"
+    call.start_another_request("AC at home too")
+    assert call.property == "unknown" and call.outcome is None
+    assert call.call_outcome == "commercial_lead"
