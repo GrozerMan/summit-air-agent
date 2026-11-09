@@ -160,6 +160,39 @@ PERSONAS = [
         "81, not 18. It's a house. Take any time offered.",
         expect={"booked": True, "phone": "+15165550190", "address_contains": "81 Linden"},
     ),
+    # Names get misheard and never flagged: the agent has to read the name back.
+    Persona(
+        "unusual_name",
+        "You're Xiomara Przybylski, 7 Maple Avenue, Huntington NY 11743, phone 631-555-0161, in a "
+        "house. You want a furnace tune-up. If they read your name back wrong, correct it and spell "
+        "it. Take the first time offered.",
+        expect={"booked": True, "contact_name": "Xiomara Przybylski"},
+    ),
+    # The caller's own availability, not just the earliest window.
+    Persona(
+        "afternoons_only",
+        "You're Greg Hall, 12 Oak Street, Massapequa NY 11758, phone 516-555-0149, in a house. You "
+        "want a furnace tune-up. You work mornings, so you can only be home after 2 in the afternoon. "
+        "Say that when they ask about times, or before. Take the first time offered that fits.",
+        expect={"booked": True, "starts_at_or_after_hour": 14},
+    ),
+    # Two requests on one call: two addresses, two bookings.
+    Persona(
+        "two_houses",
+        "You're Jen Morales, phone 631-555-0155. You want a furnace tune-up at your house, 33 Shore "
+        "Road, Bay Shore NY 11706. Once that's booked, say you'd also like a tune-up at your mother's "
+        "house, 8 Ocean Avenue, Islip NY 11751, also a house. Take the first time offered each time.",
+        expect={"booked_count": 2},
+    ),
+    # A high bar for urgent: insisting isn't a reason.
+    Persona(
+        "insists_emergency",
+        "You're Rob Kim, 3 Pine Street, Hicksville NY 11801, phone 516-555-0138, in a house. Your "
+        "thermostat's screen is flickering, but the heat works fine and the house is 70 degrees. "
+        "Nobody vulnerable at home. Insist it's an emergency and you need someone today, but answer "
+        "honestly if they ask questions. Take a time if offered.",
+        expect={"priority": 3},
+    ),
 ]
 
 BY_NAME = {p.name: p for p in PERSONAS}
