@@ -44,6 +44,7 @@ from summit.backend import ActionRefused, CallSession, caller_turn_to_screen, cl
 from summit.call_metrics import CallMetrics
 from summit.claims import booking_claims, callback_claims
 from summit.notify import Notifier
+from summit.speech import plain_speech
 from summit.store import Store
 from summit.triage import Facts
 
@@ -54,7 +55,13 @@ logger = logging.getLogger("summit-air")
 # Must match the agent name in the LiveKit dispatch rule for the phone number. A laptop
 # worker should set AGENT_NAME=summit-air-dev so it never takes calls meant for the deploy.
 AGENT_NAME = os.getenv("AGENT_NAME", "summit-air")
-PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text().strip()
+PROMPT_PATH = Path(__file__).parent / "prompts" / "system_prompt.md"
+
+
+def load_prompt() -> str:
+    """Read for every call, so a prompt edit reaches the next call without restarting the worker."""
+    return PROMPT_PATH.read_text().strip()
+
 
 CHECK_INS = ["Are you still there?", "Sorry, I can't hear you. If you're still there, just say something."]
 SILENT_GOODBYE = "I'll let you go for now. If you still need us, call back any time. Goodbye."
@@ -89,7 +96,7 @@ def instructions_for(call: CallSession) -> str:
         if number
         else "There's no live transfer to a person right now: if they want one, offer a callback from the office."
     )
-    return f"{PROMPT}\n\n## Right now\nIt's {now:%A}, {now:%B} {now.day}, {time_of_day}. {office} {transfer}"
+    return f"{load_prompt()}\n\n## Right now\nIt's {now:%A}, {now:%B} {now.day}, {time_of_day}. {office} {transfer}"
 
 
 class SummitAgent(Agent):
@@ -154,6 +161,7 @@ class SummitAgent(Agent):
         pending = ""
 
         def checked(sentence: str) -> str | None:
+            sentence = plain_speech(sentence)  # no spoken asterisks or "dash" bullets
             if booking_claims(sentence) and not self.call.has_booking():
                 held.append(sentence.strip())
                 return None
