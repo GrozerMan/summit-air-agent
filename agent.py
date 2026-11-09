@@ -44,6 +44,7 @@ from summit.backend import ActionRefused, CallSession, caller_turn_to_screen, cl
 from summit.call_metrics import CallMetrics
 from summit.claims import booking_claims, callback_claims
 from summit.notify import Notifier
+from summit.speech import plain_speech
 from summit.store import Store
 from summit.triage import Facts
 
@@ -54,7 +55,13 @@ logger = logging.getLogger("summit-air")
 # Must match the agent name in the LiveKit dispatch rule for the phone number. A laptop
 # worker should set AGENT_NAME=summit-air-dev so it never takes calls meant for the deploy.
 AGENT_NAME = os.getenv("AGENT_NAME", "summit-air")
-PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text().strip()
+PROMPT_PATH = Path(__file__).parent / "prompts" / "system_prompt.md"
+
+
+def load_prompt() -> str:
+    """Read for every call, so a prompt edit reaches the next call without restarting the worker."""
+    return PROMPT_PATH.read_text().strip()
+
 
 CHECK_INS = ["Are you still there?", "Sorry, I can't hear you. If you're still there, just say something."]
 SILENT_GOODBYE = "I'll let you go for now. If you still need us, call back any time. Goodbye."
@@ -89,7 +96,7 @@ def instructions_for(call: CallSession) -> str:
         if number
         else "There's no live transfer to a person right now: if they want one, offer a callback from the office."
     )
-    return f"{PROMPT}\n\n## Right now\nIt's {now:%A}, {now:%B} {now.day}, {time_of_day}. {office} {transfer}"
+    return f"{load_prompt()}\n\n## Right now\nIt's {now:%A}, {now:%B} {now.day}, {time_of_day}. {office} {transfer}"
 
 
 class SummitAgent(Agent):
@@ -154,6 +161,7 @@ class SummitAgent(Agent):
         pending = ""
 
         def checked(sentence: str) -> str | None:
+            sentence = plain_speech(sentence)  # no spoken asterisks or "dash" bullets
             if booking_claims(sentence) and not self.call.has_booking():
                 held.append(sentence.strip())
                 return None
@@ -255,6 +263,7 @@ class SummitAgent(Agent):
         active_leak: bool | None = None,
         minor_drip: bool | None = None,
         request_type: str | None = None,
+        urgent_reason: str | None = None,
     ) -> str:
         """Report what the caller has described. Call it as soon as you know the problem and
         again whenever you learn something new. Leave anything you don't know empty; never guess.
@@ -279,13 +288,17 @@ class SummitAgent(Agent):
             active_leak: Water is actively leaking.
             minor_drip: A small drip only.
             request_type: For non-problems: tune_up, estimate, or other.
+            urgent_reason: Only if waiting a day or more would be unsafe for a reason none of the
+                fields above capture: the specific fact, in a few words ("water dripping onto the
+                electrical panel", "he's on oxygen and it's 88 inside"). How badly the caller wants
+                someone, or that they call it an emergency, is not a reason and is ignored.
         """
         args = dict(
             description=description, gas_smell=gas_smell, co_alarm_or_symptoms=co_alarm_or_symptoms,
             smoke_sparks_or_flames=smoke_sparks_or_flames, burning_smell_persistent=burning_smell_persistent,
             dusty_smell_first_use=dusty_smell_first_use, no_heat=no_heat, no_cooling=no_cooling,
             indoor_temp_f=indoor_temp_f, vulnerable_occupant=vulnerable_occupant, active_leak=active_leak,
-            minor_drip=minor_drip, request_type=request_type,
+            minor_drip=minor_drip, request_type=request_type, urgent_reason=urgent_reason,
         )  # fmt: skip
         return self._run("assess_situation", args, lambda: self.call.assess_situation(Facts(**args)))
 
@@ -318,18 +331,30 @@ class SummitAgent(Agent):
         context: RunContext,
         reschedule_appointment_id: int | None = None,
         caller_says_member: bool | None = None,
+        days: list[str] | None = None,
+        not_before: str | None = None,
+        after_time: str | None = None,
+        before_time: str | None = None,
     ) -> str:
         """Get arrival windows to offer. For a new visit, call it after assess_situation and
-        check_service_address. To move an existing appointment, pass its id.
+        check_service_address. To move an existing appointment, pass its id. If the caller has
+        said when they can be home, pass it so only windows that fit come back; leave the
+        availability fields empty if they haven't said.
 
         Args:
             reschedule_appointment_id: The id of the appointment being moved, if rescheduling.
             caller_says_member: For a caller who isn't verified: their answer when asked whether
                 they're already a member. Leave empty until you've asked.
+            days: Days they can be home: weekday names ("tuesday"), "weekdays", "weekend", or
+                dates as YYYY-MM-DD (work out "tomorrow" or "next Friday" from today's date).
+            not_before: The earliest date they can do, YYYY-MM-DD ("not until next week").
+            after_time: They're home from this time on, 24-hour HH:MM ("after 3" is 15:00).
+            before_time: They're home until this time, 24-hour HH:MM ("mornings" is 12:00).
         """
         args = dict(
-            reschedule_appointment_id=reschedule_appointment_id, caller_says_member=caller_says_member
-        )
+            reschedule_appointment_id=reschedule_appointment_id, caller_says_member=caller_says_member,
+            days=days, not_before=not_before, after_time=after_time, before_time=before_time,
+        )  # fmt: skip
         return self._run("find_appointment_options", args, lambda: self.call.find_appointment_options(**args))
 
     @function_tool
@@ -348,9 +373,11 @@ class SummitAgent(Agent):
         address_read_back_confirmed: bool,
         equipment: str | None = None,
         access_notes: str | None = None,
+        name_read_back_confirmed: bool | None = None,
     ) -> str:
-        """Book the window the caller chose. Before calling, read the phone number back digit
-        by digit and the full address back, and hear them confirm both.
+        """Book the window the caller chose. Before calling, read their first and last name
+        back (ask them to spell it if it's unusual or you're unsure), the phone number back
+        digit by digit and the full address back, and hear them confirm each.
 
         Args:
             option_id: The option_id of the window they picked.
@@ -368,6 +395,9 @@ class SummitAgent(Agent):
             equipment: The system, if they know: furnace, boiler, heat pump, central AC, mini-split; gas,
                 oil or electric; roughly how old.
             access_notes: How the technician gets in: apartment number, gate or door code, pets, parking.
+            name_read_back_confirmed: You read their first and last name back (or spelled them)
+                and they said it's right. Not needed for a verified customer. The backend checks
+                that you actually said it.
         """
         args = dict(
             option_id=option_id, first_name=first_name, last_name=last_name, phone=phone,
@@ -375,6 +405,7 @@ class SummitAgent(Agent):
             phone_read_back_confirmed=phone_read_back_confirmed,
             address_read_back_confirmed=address_read_back_confirmed,
             equipment=equipment, access_notes=access_notes,
+            name_read_back_confirmed=name_read_back_confirmed,
         )  # fmt: skip
         return self._run("book_appointment", args, lambda: self.call.book_appointment(**args))
 
@@ -398,6 +429,18 @@ class SummitAgent(Agent):
         """
         args = dict(appointment_id=appointment_id)
         return self._run("cancel_appointment", args, lambda: self.call.cancel_appointment(**args))
+
+    @function_tool
+    async def start_another_request(self, context: RunContext, reason: str) -> str:
+        """The caller has a second, separate problem, or the same problem at another address,
+        after the first one is booked or set for a callback. Starts a fresh request on the
+        same call. Not for more detail about the visit just booked: that goes in its notes.
+
+        Args:
+            reason: What the new request is, in a few words.
+        """
+        args = dict(reason=reason)
+        return self._run("start_another_request", args, lambda: self.call.start_another_request(**args))
 
     @function_tool
     async def request_callback(

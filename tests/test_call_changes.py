@@ -25,7 +25,7 @@ def offered_tune_up(call, zip_code="11706"):
     call.assess_situation(Facts(request_type="tune_up", description="tune-up"))
     call.check_service_address(zip_code=zip_code, property_type="house")
     call.find_appointment_options(caller_says_member=False)
-    call.agent_said += f" That's {BOOK['phone']}, at {BOOK['address']}. Right?"
+    call.agent_said += f" That's Sam Ortiz, {BOOK['phone']}, at {BOOK['address']}. Right?"
     return dict(call.offered)
 
 

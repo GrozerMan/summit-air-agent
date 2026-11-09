@@ -12,6 +12,7 @@ fake, deterministic load so the demo has realistic gaps in it.
 """
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -86,9 +87,11 @@ class Scheduler:
         is_member: bool,
         now: datetime,
         limit: int | None = None,
+        fits: Callable[[date, str], bool] | None = None,
     ) -> list[Option]:
         """Earliest windows first, one option per window, saving reserve capacity
-        for when regular capacity has run out."""
+        for when regular capacity has run out. `fits` narrows the windows to when the
+        caller said they can be home."""
         limit = limit or self.rules["options_to_offer"]
         now = now.astimezone(self.tz)
         pools = self._pools(priority, is_member)
@@ -98,6 +101,8 @@ class Scheduler:
             day = now.date() + timedelta(days=offset)
             for window in self.rules["windows"]:
                 if not self._window_fits(day, window, priority, now):
+                    continue
+                if fits is not None and not fits(day, window):
                     continue
                 pool = next((p for p in pools if self.seats_left(county, day, window, p) > 0), None)
                 if pool is None:

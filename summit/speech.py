@@ -105,3 +105,43 @@ def say_hotline(number: str) -> str:
         else:
             spoken.append(" ".join(_WORDS[int(d)] for d in group))
     return ", ".join(spoken)
+
+
+def plain_speech(text: str) -> str:
+    """Flatten markdown in a stretch of the model's reply to something a voice can say.
+
+    The prompt says no lists and no markdown, but models format for a screen anyway, and
+    TTS then reads asterisks out loud, or runs a bulleted list together into one breathless
+    sentence. Bullets become clauses ("A, B, or C" rather than "dash A dash B"). Spacing at
+    either end is kept, because this runs on the stream a sentence at a time. Numbered lists
+    are left alone: streamed a sentence at a time, "1. " looks just like the "555. " of a
+    phone number read back in groups, and losing digits there would fail the read-back check.
+    """
+    if not text.strip():
+        return text
+    lead = " " if text[0].isspace() else ""
+    trail = " " if text[-1].isspace() else ""
+    body = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    body = re.sub(r"(?<!\w)[*_](\S(?:.*?\S)?)[*_](?!\w)", r"\1", body)
+    body = re.sub(r"`([^`]+)`", r"\1", body)
+    body = re.sub(r"(?m)^\s*#{1,6}\s*", "", body)
+    out = ""
+    for raw in body.splitlines():
+        line = re.sub(r"^\s*[-*+•–—]\s+", "", raw).strip()
+        if not line:
+            continue
+        if not out:
+            out = line
+        elif out.endswith((".", "!", "?", ":", ",", ";")):
+            out += " " + line
+        else:
+            out += ", " + line
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    return f"{lead}{out}{trail}" if out else lead or trail
+
+
+def say_confirmation(appointment_id: int) -> str:
+    """The appointment number as four or more digits, said one by one ("0 0 4 7"), so it
+    sounds like a confirmation number and the caller can write it down. It's the number
+    the office looks the visit up by (appointment #47)."""
+    return " ".join(f"{appointment_id:04d}")

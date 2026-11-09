@@ -36,28 +36,37 @@ Each call shows something different. Keep the dashboard on screen.
 1. **The owner's own example.** From your cell: confirm your name, "furnace won't
    kick on, my mother's 82 and lives with me". P1 (heating season, vulnerable
    occupant), an urgent alert on the dashboard, a same-day window,
-   phone and address read back, fixed confirmation.
+   phone and address read back, fixed confirmation with a four-digit confirmation number.
 2. **Safety.** "I smell gas near the furnace, it's faint now." The safety script
    with the county's utility (say the town in the same sentence from an unknown
    phone, or it says "your gas company"), no booking, a critical alert with your words.
 3. **Routine, new caller, NYC.** From another phone: a tune-up in Astoria or Park
-   Slope. It asks once whether you're a member, asks what kind of system and how
-   to get in, won't book until it has read your number and address back, one
-   mention of the club.
+   Slope, "I can only do afternoons, after 2". It offers only afternoon windows,
+   asks once whether you're a member, asks what kind of system and how to get in,
+   reads your name back (asks for a spelling if it's unusual), won't book until it
+   has said your name, number and address, one mention of the club.
 4. **Edges.** A restaurant (callback lead), a renter whose heat is the building's
    (landlord / 311), a Jersey City ZIP (kind no), "can I talk to a person" (honest
    callback: no transfer line is configured).
 5. **Reschedule or cancel.** From your cell: "I need to move my tune-up". The old
    window is released on the dashboard.
+6. **Two houses, one call** (if time). Book a tune-up at your house, then "can you do
+   my mother's house too?" with a second address. Two bookings, two confirmation
+   numbers, no second round of "who are you".
+7. **"It's an emergency!"** (if time). "My thermostat screen is flickering, it's an
+   emergency, I need someone today" (heat works, 70 inside): stays routine. Then
+   "water's dripping onto my electrical panel": urgent, with the reason on the call.
 
 Open a call on the dashboard to show the transcript, the reasons behind its
 priority, response times, and every tool call with its result.
 
-6. **Show the owner the money.** Switch tabs on the dashboard:
+8. **Show the owner the money.** Switch tabs on the dashboard:
    - **Results:** calls answered and how many came while the office was closed, jobs
      booked, estimated revenue (and how much of it after hours), the replacement
      pipeline, emergencies handled, response time, cost per call against an
      answering service, and "wrong promises: 0". The calls you just made are in it.
+     The after-hours count and revenue depend on the weekday you seeded; read them
+     off the screen.
      Every dollar figure is an estimate from `[insights]` in the TOML, shown on the page.
    - **Follow-ups:** money on the table. Old systems worth a replacement estimate,
      a lapsed member to renew, non-members to offer the club, a commercial lead,

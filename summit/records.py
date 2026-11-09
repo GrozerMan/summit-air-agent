@@ -15,8 +15,49 @@ from summit.service_area import area_name
 from summit.speech import say_phone
 from summit.store import Store
 
+# Which outcome a call with several requests shows, most telling first.
+_OUTCOME_RANK = [
+    "safety_emergency", "booked", "rescheduled", "cancelled", "callback", "transferred",
+    "commercial_lead", "building_system", "out_of_area", "info_only", "abandoned",
+]  # fmt: skip
+
 
 class RecordsMixin:
+    @property
+    def call_priority(self) -> Priority | None:
+        """The most serious priority of any request on the call."""
+        found = [Priority(r["priority"]) for r in self.earlier_requests if r["priority"] is not None]
+        if self.priority is not None:
+            found.append(self.priority)
+        return min(found) if found else None
+
+    @property
+    def call_outcome(self) -> str | None:
+        found = [r["outcome"] for r in self.earlier_requests if r["outcome"]]
+        if self.outcome:
+            found.append(self.outcome)
+        if not found:
+            return None
+        return min(found, key=lambda o: _OUTCOME_RANK.index(o) if o in _OUTCOME_RANK else len(_OUTCOME_RANK))
+
+    def call_summary(self) -> str:
+        """The dashboard's summary: earlier requests on the call, then the current one."""
+        earlier = [
+            f"Request {n}: P{r['priority']} {', '.join(r['reasons'])}, "
+            + (
+                f"appointment {', '.join(f'#{a}' for a in r['appointments'])}"
+                if r["appointments"]
+                else (r["outcome"] or "").replace("_", " ")
+            )
+            + "."
+            for n, r in enumerate(self.earlier_requests, start=1)
+            if r["priority"] is not None
+        ]
+        now = self.technician_summary()
+        if earlier:
+            now = f"Request {len(self.earlier_requests) + 1}: {now}"
+        return " ".join([*earlier, now]).strip()
+
     def log_tool(self, name: str, args: dict[str, Any], result: str, refused: bool = False) -> None:
         self.tool_log.append(
             {"tool": name, "args": args, "result": result, "refused": refused, "at": self.now().isoformat()}
@@ -33,9 +74,9 @@ class RecordsMixin:
             started_at=self.started_at,
             ended_at=self.now() if ended else None,
             last_seen=self.now(),
-            priority=self.priority,
-            outcome=self.outcome,
-            summary=self.technician_summary(),
+            priority=self.call_priority,
+            outcome=self.call_outcome,
+            summary=self.call_summary(),
             record=self.record(),
             transcript=transcript,
         )
@@ -47,10 +88,11 @@ class RecordsMixin:
             self.outcome in (None, "callback")
             and self.priority is not None
             and self.priority != Priority.P0
-            and not self.booked
-            and not self.callbacks
+            # Nothing booked or called back for this request (a call can carry several).
+            and len(self.booked) == self._request_booked_from
+            and len(self.callbacks) == self._request_callbacks_from
             # A callback already made for this call (by the dropped-call recovery) is enough.
-            and not self.store.callbacks_for_call(self.call_id)
+            and len(self.store.callbacks_for_call(self.call_id)) <= len(self.callbacks)
         )
         if needs_follow_up:
             if self.callback_phone:
@@ -136,7 +178,7 @@ class RecordsMixin:
             "caller_id": self.caller_id,
             "verified_customer_id": self.customer.id if self.customer else None,
             "facts": self.facts.known(),
-            "priority": int(self.priority) if self.priority is not None else None,
+            "priority": int(self.call_priority) if self.call_priority is not None else None,
             "reasons": self.assessment.reasons if self.assessment else [],
             "service_area": {"county": self.area.county, "zip": self.area.zip} if self.area else None,
             "property": self.property,
@@ -145,7 +187,9 @@ class RecordsMixin:
             "callbacks": self.callbacks,
             "notes": self.notes,
             "false_claims": self.false_claims,
-            "outcome": self.outcome,
+            "outcome": self.call_outcome,
+            "requests": self.earlier_requests,
+            "caller_availability": self.caller_availability,
             "metrics": self.metrics,
             "tools": self.tool_log,
         }

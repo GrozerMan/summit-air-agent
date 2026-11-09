@@ -16,7 +16,8 @@ from summit.backend import CallSession
 
 TOOLS = [
     "lookup_customer", "assess_situation", "check_service_address", "find_appointment_options",
-    "book_appointment", "change_appointment", "request_callback", "transfer_to_human", "get_pricing",
+    "book_appointment", "change_appointment", "start_another_request", "request_callback",
+    "transfer_to_human", "get_pricing",
 ]  # fmt: skip
 
 
@@ -27,7 +28,15 @@ def test_every_tool_is_exposed(member_call):
 
 @pytest.mark.parametrize(
     "tool",
-    ["lookup_customer", "check_service_address", "book_appointment", "request_callback", "get_pricing"],
+    [
+        "lookup_customer",
+        "check_service_address",
+        "find_appointment_options",
+        "book_appointment",
+        "start_another_request",
+        "request_callback",
+        "get_pricing",
+    ],  # fmt: skip
 )
 def test_tool_arguments_match_the_backend(tool):
     agent_params = list(inspect.signature(getattr(SummitAgent, tool)).parameters)[2:]
@@ -81,7 +90,7 @@ async def test_booking_confirmation_is_spoken_without_the_model(make_call):
     call.check_service_address(zip_code="11706", property_type="house")
     call.find_appointment_options(caller_says_member=False)
     option_id = next(iter(call.offered))
-    call.agent_said = "That's 631-555-0155, at 33 Shore Road, Bay Shore. Is that right?"
+    call.agent_said = "That's Jen Morales, 631-555-0155, at 33 Shore Road, Bay Shore. Is that right?"
     result = await agent.book_appointment(
         None, option_id, "Jen", "Morales", "631-555-0155", "33 Shore Road, Bay Shore", "11706",
         "tune-up", "", True, True,

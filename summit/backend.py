@@ -7,7 +7,7 @@ ActionRefused with a message telling the model exactly what to fix.
 
 import re
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from summit import config, pricing
@@ -16,13 +16,15 @@ from summit.identity import IdentityMixin
 from summit.models import ActionRefused, Appointment, Customer, Membership, Priority
 from summit.notify import Notifier
 from summit.records import RecordsMixin, close_abandoned_calls
-from summit.scheduling import AppointmentChanged, Option, Scheduler, say_day, say_window
+from summit.scheduling import AppointmentChanged, Option, Scheduler, say_day, say_window, window_bounds
 from summit.service_area import AreaCheck, area_name, check_town, check_zip, property_kind
-from summit.speech import normalize_phone, normalize_zip, say_phone, spoken_digits
+from summit.speech import normalize_phone, normalize_zip, say_confirmation, say_phone, spoken_digits
 from summit.store import Store
 from summit.triage import Assessment, Facts
 
 _NYC_COUNTIES = {"Kings", "Queens", "Bronx", "New York", "Richmond"}
+
+_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
 __all__ = ["ActionRefused", "CallSession", "caller_turn_to_screen", "close_abandoned_calls"]
@@ -91,6 +93,21 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         self.agent_said = ""
         # Response times and usage, filled in at hang-up (summit/call_metrics.py).
         self.metrics: dict[str, Any] = {}
+
+        # One call can carry more than one request: a second problem, or the same problem
+        # at a second address. Each finished request is archived here and the triage,
+        # address and offers start fresh; who the caller is carries over.
+        self.earlier_requests: list[dict[str, Any]] = []
+        self._request_booked_from = 0
+        self._request_callbacks_from = 0
+        # Customers created on this call by an unverified caller, by (phone, last name), so
+        # their second booking lands on the record their first one made.
+        self._created_customers: dict[tuple[str, str], int] = {}
+        # Booking attempts refused in a row on this request. At the limit the office is
+        # asked to call back and finish it, rather than the caller being stuck in a loop.
+        self.booking_failures = 0
+        self.failure_callback_set = False
+        self.caller_availability: str | None = None
 
     def now(self) -> datetime:
         return self._clock().astimezone(self.tz)
@@ -200,9 +217,16 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
     # Scheduling
 
     def find_appointment_options(
-        self, reschedule_appointment_id: int | None = None, caller_says_member: bool | None = None
+        self,
+        reschedule_appointment_id: int | None = None,
+        caller_says_member: bool | None = None,
+        days: list[str] | None = None,
+        not_before: str | None = None,
+        after_time: str | None = None,
+        before_time: str | None = None,
     ) -> str:
         self._refuse_if_emergency()
+        fits, wanted = self._availability_filter(days, not_before, after_time, before_time)
         if reschedule_appointment_id is not None:
             appointment = self._own_appointment(reschedule_appointment_id)
             county, priority = appointment.county, appointment.priority
@@ -212,7 +236,21 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
             assert self.assessment and self.area and self.area.county
             county, priority = self.area.county, self.assessment.priority
 
-        options = self.scheduler.find_options(county, priority, self.is_member, self.now())
+        if wanted and wanted != self.caller_availability:
+            self.caller_availability = wanted
+            self.notes = [n for n in self.notes if not n.startswith("caller availability:")]
+            self.note(f"caller availability: {wanted}")
+        options = self.scheduler.find_options(county, priority, self.is_member, self.now(), fits=fits)
+        header = ""
+        if fits is not None and not options:
+            # Nothing open when they said they're home: offer what is open, and say so,
+            # rather than a dead end.
+            options = self.scheduler.find_options(county, priority, self.is_member, self.now())
+            if options:
+                header = f"Nothing open fits what they said ({wanted}). Say so, and offer these nearest open windows instead."
+                if priority == Priority.P1:
+                    hours = self.cfg["triage"]["p1_within_hours"]
+                    header += f" An urgent visit has to be within {hours} hours, so these are the options."
         if not options:
             if priority == Priority.P1:
                 return self._no_urgent_capacity()
@@ -234,15 +272,79 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
                 else ""
             )
             lines.append(f"- {option.option_id}: {option.speakable(today)}{surcharge}")
-        notes = [line for line in lines if not line.startswith("- ")]
-        windows = [line for line in lines if line.startswith("- ")]
         return (
-            "".join(f"{n}\n" for n in notes)
+            (f"{header}\n" if header else "")
             + "Offer these arrival windows, earliest first. The technician arrives within the window.\n"
-            + "\n".join(windows)
+            + "\n".join(lines)
             + "\nBook with the option_id the caller picks."
             + self._tech_details_reminder()
         )
+
+    def _availability_filter(
+        self,
+        days: list[str] | None,
+        not_before: str | None,
+        after_time: str | None,
+        before_time: str | None,
+    ) -> tuple[Callable[[date, str], bool] | None, str]:
+        """When the caller said they can be home, as a test on (day, window), and in words for
+        the ticket. A window fits only if it lies wholly inside what they said."""
+        weekdays: set[int] = set()
+        dates: set[date] = set()
+        problems = []
+        for raw in days or []:
+            word = raw.strip().lower()
+            if word in ("weekday", "weekdays"):
+                weekdays.update(range(5))
+            elif word in ("weekend", "weekends"):
+                weekdays.update((5, 6))
+            elif any(day.startswith(word[:3]) for day in _WEEKDAYS) and len(word) >= 3 and word.isalpha():
+                weekdays.add(next(i for i, day in enumerate(_WEEKDAYS) if day.startswith(word[:3])))
+            else:
+                try:
+                    dates.add(date.fromisoformat(word))
+                except ValueError:
+                    problems.append(f"days entry '{raw}' (use a weekday name, 'weekdays', or YYYY-MM-DD)")
+        earliest_day = None
+        if not_before:
+            try:
+                earliest_day = date.fromisoformat(not_before.strip())
+            except ValueError:
+                problems.append(f"not_before '{not_before}' (use YYYY-MM-DD)")
+        after, before = _clock(after_time), _clock(before_time)
+        if after_time and after is None:
+            problems.append(f"after_time '{after_time}' (use 24-hour HH:MM, e.g. 15:00)")
+        if before_time and before is None:
+            problems.append(f"before_time '{before_time}' (use 24-hour HH:MM, e.g. 12:00)")
+        if problems:
+            raise ActionRefused(
+                "Couldn't read the caller's availability: " + "; ".join(problems) + ". Try again."
+            )
+        if not (weekdays or dates or earliest_day or after or before):
+            return None, ""
+
+        def fits(day: date, window: str) -> bool:
+            start, end = window_bounds(window)
+            if (weekdays or dates) and day.weekday() not in weekdays and day not in dates:
+                return False
+            if earliest_day and day < earliest_day:
+                return False
+            if after and start < after:
+                return False
+            return not (before and end > before)
+
+        words = []
+        if weekdays or dates:
+            named = [_WEEKDAYS[i].capitalize() for i in sorted(weekdays)]
+            named += [f"{d:%A %B} {d.day}" for d in sorted(dates)]
+            words.append(" or ".join(named))
+        if earliest_day:
+            words.append(f"from {earliest_day:%A %B} {earliest_day.day}")
+        if after:
+            words.append(f"after {_say_clock(after)}")
+        if before:
+            words.append(f"before {_say_clock(before)}")
+        return fits, ", ".join(words)
 
     def _check_membership_asked(self, caller_says_member: bool | None) -> None:
         """No times exist until we know whether an unknown caller is already a member, so a
@@ -350,6 +452,68 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         address_read_back_confirmed: bool,
         equipment: str | None = None,
         access_notes: str | None = None,
+        name_read_back_confirmed: bool | None = None,
+    ) -> str:
+        try:
+            result = self._book_appointment(
+                option_id, first_name, last_name, phone, address, zip_code, job_type, notes,
+                phone_read_back_confirmed, address_read_back_confirmed, equipment, access_notes,
+                name_read_back_confirmed,
+            )  # fmt: skip
+        except ActionRefused as refused:
+            if self.priority == Priority.P0:
+                raise
+            self.booking_failures += 1
+            raise ActionRefused(str(refused) + self._after_failed_booking(phone)) from None
+        self.booking_failures = 0
+        return result
+
+    def _after_failed_booking(self, phone: str) -> str:
+        """After the limit of refused bookings in a row, the office takes over: a callback and
+        an alert, once per request. The caller can still keep going if they'd rather."""
+        limit = self.cfg["escalation"]["max_booking_failures"]
+        if self.booking_failures < limit or self.failure_callback_set:
+            return ""
+        self.failure_callback_set = True
+        urgent = self.priority == Priority.P1
+        number = self.callback_phone or normalize_phone(phone)
+        self.notifier.alert(
+            self.call_id,
+            "urgent" if urgent else "info",
+            f"Agent couldn't complete a booking after {limit} tries for {self._who()}; office to finish it.",
+        )
+        self.note(f"booking failed {limit} times in a row; office to finish it")
+        if not number:
+            return (
+                f" That's {limit} tries without a booking. Ask for the best number to reach them and set a "
+                "callback (request_callback) so the office can finish it."
+            )
+        due = self._add_callback(
+            number, f"Booking failed {limit} times on the call; finish booking", urgent=urgent
+        )
+        if self.outcome is None:
+            self.outcome = "callback"
+        return (
+            f" That's {limit} tries without a booking, so a callback is now set: the office will call "
+            f"{say_phone(number)} {self._say_due(due, urgent)} to finish it. Tell the caller that. If they'd "
+            "rather keep going now, fix the above and try once more."
+        )
+
+    def _book_appointment(
+        self,
+        option_id: str,
+        first_name: str,
+        last_name: str,
+        phone: str,
+        address: str,
+        zip_code: str,
+        job_type: str,
+        notes: str,
+        phone_read_back_confirmed: bool,
+        address_read_back_confirmed: bool,
+        equipment: str | None,
+        access_notes: str | None,
+        name_read_back_confirmed: bool | None,
     ) -> str:
         option = self.offered.get(option_id)
         phone_e164 = normalize_phone(phone)
@@ -357,9 +521,10 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
 
         self._refuse_if_emergency()
         problems = []
-        if self.booked:
+        if len(self.booked) > self._request_booked_from:
             problems.append(
-                f"this call already booked appointment #{self.booked[-1]}; use change_appointment to move it"
+                f"this request already booked appointment #{self.booked[-1]}; use change_appointment to move "
+                "it, or start_another_request if it's a different problem or a different address"
             )
         if option is None or self.offered_for.get(option_id) is not None:
             problems.append(
@@ -394,6 +559,18 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
             problems.append(
                 f"ZIP {zip5 or zip_code} doesn't match the ZIP checked for the service area ({checked}); "
                 "confirm the address and run check_service_address again"
+            )
+        if (
+            self.customer is None
+            and (first_name or "").strip()
+            and (last_name or "").strip()
+            and (name_read_back_confirmed is False or not self._read_back_name(first_name, last_name))
+        ):
+            # Speech-to-text mishears names without flagging it, and a wrong name ends up on the
+            # ticket, on the technician's phone and on the next call's greeting.
+            problems.append(
+                "read their first and last name back (ask them to spell it if it's unusual or you're unsure) "
+                "and get a yes"
             )
         if not phone_read_back_confirmed or (phone_e164 and not self._read_back_phone(phone_e164)):
             problems.append("read the phone number back digit by digit and get a yes")
@@ -434,7 +611,8 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         today = self.now().date()
         self.announcement = (
             f"You're booked. A technician will arrive {option.speakable(today)}, at {address.strip()}. "
-            f"{self._spoken_price(job_type, option.after_hours)} Is there anything else I can help with?"
+            f"{self._spoken_price(job_type, option.after_hours)} "
+            f"Your confirmation number is {say_confirmation(appointment_id)}. Is there anything else I can help with?"
         )
         return (
             f"Booked: appointment #{appointment_id}. This confirmation is being read to the caller word "
@@ -445,6 +623,18 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         """The agent actually said these ten digits, in any spoken form ("516-555-0142",
         "five one six, five five five, oh one four two")."""
         return phone_e164.removeprefix("+1") in spoken_digits(self.agent_said)
+
+    def _read_back_name(self, first_name: str, last_name: str) -> bool:
+        """The agent said both names, whole ("Ortiz") or spelled out ("O-R-T-I-Z")."""
+        said = self.agent_said.lower()
+        for name in (first_name, last_name):
+            letters = re.sub(r"[^a-z]", "", name.lower())
+            if not letters:
+                continue
+            pattern = r"(?<![a-z])" + r"[\s\-.,']*".join(letters) + r"(?![a-z])"
+            if not re.search(pattern, said):
+                return False
+        return True
 
     def _read_back_address(self, address: str) -> bool:
         """The agent said the house number and the street name."""
@@ -484,6 +674,9 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         and let them move it. The office sees the possible match and merges if it's real."""
         if self.customer:
             return self.customer.id, False
+        made_here = self._created_customers.get((phone, last_name.strip().lower()))
+        if made_here:
+            return made_here, False
         existing = self.store.customers_by_phone(phone)
         if existing:
             names = ", ".join(f"#{c.id} {c.full_name}" for c in existing)
@@ -501,6 +694,7 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
             county,
             confirmed=not existing,
         )
+        self._created_customers[(phone, last_name.strip().lower())] = customer_id
         return customer_id, True
 
     def change_appointment(self, appointment_id: int, option_id: str) -> str:
@@ -535,7 +729,8 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         today = self.now().date()
         self.announcement = (
             f"Done. Your {appointment.job_type} is now {option.speakable(today)}, and the old time has "
-            "been released. Is there anything else I can help with?"
+            f"been released. Your new confirmation number is {say_confirmation(new_id)}. "
+            "Is there anything else I can help with?"
         )
         return (
             f"Moved: appointment #{new_id}. This confirmation is being read to the caller word for word, "
@@ -604,6 +799,54 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         raise ActionRefused(
             "That window was just taken by another booking. Apologize, then offer these instead. "
             + alternatives
+        )
+
+    def start_another_request(self, reason: str) -> str:
+        """A second problem, or the same problem at another address, on the same call.
+
+        Only once the current request is settled (booked, a callback set, or turned away),
+        so it can't be used to start over on a request the backend refused, or to drop a
+        priority: priority never goes down within a request."""
+        self._refuse_if_emergency()
+        if self.assessment is None:
+            raise ActionRefused(
+                "Nothing has been assessed on this call yet: call assess_situation with the problem."
+            )
+        settled = (
+            len(self.booked) > self._request_booked_from
+            or len(self.callbacks) > self._request_callbacks_from
+            or self.outcome in ("out_of_area", "commercial_lead", "building_system")
+        )
+        if not settled:
+            raise ActionRefused(
+                "Finish the current request first: book it (book_appointment) or set a callback "
+                "(request_callback). If it's more about the same visit, put it in that booking's notes instead."
+            )
+        self.earlier_requests.append(
+            {
+                "priority": int(self.priority) if self.priority is not None else None,
+                "reasons": self.assessment.reasons,
+                "facts": self.facts.known(),
+                "service_area": {"county": self.area.county, "zip": self.area.zip} if self.area else None,
+                "property": self.property,
+                "appointments": self.booked[self._request_booked_from :],
+                "callbacks": self.callbacks[self._request_callbacks_from :],
+                "outcome": self.outcome,
+            }
+        )
+        self.facts = Facts()
+        self.assessment = None
+        self.area, self.area_from_file, self.property, self.building_system = None, False, "unknown", False
+        self._void_offers()
+        self.outcome = None
+        self.booking_failures, self.failure_callback_set = 0, False
+        self.caller_availability = None
+        self._request_booked_from, self._request_callbacks_from = len(self.booked), len(self.callbacks)
+        self.note(f"request {len(self.earlier_requests) + 1} on this call: {reason.strip()[:120]}")
+        return (
+            "New request started. Find out what's wrong (assess_situation), check the address for this one "
+            "(check_service_address; it may be a different place), then find times and book as before. Their "
+            "name and number carry over; read back anything new, like a different address."
         )
 
     # Escalation
@@ -698,3 +941,28 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         )
 
     # Record keeping
+
+
+def _clock(text: str | None) -> time | None:
+    """'15:00', '3pm', '3:30 pm' -> a time. None if it can't be read."""
+    if not text:
+        return None
+    match = re.fullmatch(r"\s*(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?\s*m?\.?\s*", text.lower())
+    if not match:
+        return None
+    hour, minute, half = int(match[1]), int(match[2] or 0), match[3]
+    if half == "p" and hour < 12:
+        hour += 12
+    elif half == "a" and hour == 12:
+        hour = 0
+    if hour > 23 or minute > 59:
+        return None
+    return time(hour, minute)
+
+
+def _say_clock(t: time) -> str:
+    hour = t.hour % 12 or 12
+    suffix = "AM" if t.hour < 12 else "PM"
+    if t.hour == 12 and t.minute == 0:
+        return "noon"
+    return f"{hour}:{t.minute:02d} {suffix}" if t.minute else f"{hour} {suffix}"

@@ -131,7 +131,8 @@ def grade(persona: Persona, call: CallSession, transcript: list[dict[str, str]])
     checks: list[Check] = []
 
     if "priority" in expect:
-        got = int(call.priority) if call.priority is not None else None
+        # The call's most serious request: a call can carry more than one.
+        got = int(call.call_priority) if call.call_priority is not None else None
         checks.append(
             Check("priority", got == expect["priority"], f"expected P{expect['priority']}, got P{got}")
         )
@@ -144,7 +145,9 @@ def grade(persona: Persona, call: CallSession, transcript: list[dict[str, str]])
         callbacks = store.callbacks_for_call(call.call_id)
         checks.append(Check("callback", bool(callbacks) == expect["callback"], f"{len(callbacks)} callbacks"))
     if "outcome" in expect:
-        checks.append(Check("outcome", call.outcome == expect["outcome"], f"outcome: {call.outcome}"))
+        checks.append(
+            Check("outcome", call.call_outcome == expect["outcome"], f"outcome: {call.call_outcome}")
+        )
     if "moved" in expect:
         moved = store.conn.execute("SELECT count(*) FROM appointments WHERE status = 'moved'").fetchone()[0]
         checks.append(Check("moved", bool(moved) == expect["moved"], f"{moved} moved"))
@@ -155,6 +158,15 @@ def grade(persona: Persona, call: CallSession, transcript: list[dict[str, str]])
         addresses = [a["service_address"] for a in booked]
         ok = any(expect["address_contains"] in a for a in addresses)
         checks.append(Check("address", ok, f"booked addresses: {addresses}"))
+    if "booked_count" in expect:
+        checks.append(Check("booked_count", len(booked) == expect["booked_count"], f"{len(booked)} booked"))
+    if "contact_name" in expect:
+        names = [a["contact_name"] for a in booked]
+        checks.append(Check("contact_name", expect["contact_name"] in names, f"booked names: {names}"))
+    if "starts_at_or_after_hour" in expect and booked:
+        start = _start(booked[0])
+        ok = start.hour >= expect["starts_at_or_after_hour"]
+        checks.append(Check("caller_hours", ok, f"starts {start:%a %H:%M}"))
     if "within_hours" in expect and booked:
         start = _start(booked[0])
         ok = start - EVAL_NOW <= timedelta(hours=expect["within_hours"])

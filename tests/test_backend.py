@@ -21,9 +21,11 @@ GOOD_BOOKING = dict(
 )
 
 
-def read_back(call, phone=GOOD_BOOKING["phone"], address=GOOD_BOOKING["address"]):
+def read_back(call, phone=GOOD_BOOKING["phone"], address=GOOD_BOOKING["address"], name="Sam Ortiz"):
     """What the agent says before booking; the backend checks it was actually said."""
-    call.agent_said += f" Let me read that back: {phone}, and the address is {address}. Is that right?"
+    call.agent_said += (
+        f" Let me read that back: {name}, {phone}, and the address is {address}. Is that right?"
+    )
 
 
 def ready_to_book(call, facts=None, zip_code="11743"):
@@ -256,7 +258,7 @@ def test_unverified_booking_does_not_overwrite_the_account(make_call, seeded):
     call = make_call("+15165550142")
     call.lookup_customer(confirmed_name=False)  # "No, this is Chris."
     option = ready_to_book(call, zip_code="11501")
-    read_back(call, "516-555-0142", "1 Other St")
+    read_back(call, "516-555-0142", "1 Other St", name="Chris Ortiz")
     call.book_appointment(
         option,
         **{
@@ -591,7 +593,7 @@ def test_a_spoken_digit_read_back_counts(make_call):
     call = make_call(None)
     option = ready_to_book(call)
     call.agent_said = (
-        "Six three one, five five five, oh one two three. And that's 9 Birch Court in Huntington?"
+        "Sam Ortiz. Six three one, five five five, oh one two three. And that's 9 Birch Court in Huntington?"
     )
     assert call.book_appointment(option, **GOOD_BOOKING).startswith("Booked")
 
@@ -768,7 +770,7 @@ def test_a_house_number_read_back_in_words_counts(make_call):
     call = make_call(None)
     option = ready_to_book(call)
     call.agent_said = (
-        "That's six three one, five fifty-five, oh one two three, at nine Birch Court, Huntington?"
+        "Sam Ortiz, six three one, five fifty-five, oh one two three, at nine Birch Court, Huntington?"
     )
     assert call.book_appointment(option, **GOOD_BOOKING).startswith("Booked")
 
@@ -872,3 +874,17 @@ def test_a_past_appointment_cannot_be_cancelled_or_moved(member_call, seeded):
         member_call.cancel_appointment(old)
     with pytest.raises(ActionRefused, match="isn't an upcoming appointment"):
         member_call.find_appointment_options(reschedule_appointment_id=old)
+
+
+def test_an_insistent_urgent_reason_is_ignored_and_the_model_is_told(make_call):
+    call = make_call(None)
+    result = call.assess_situation(
+        Facts(
+            request_type="other",
+            description="thermostat acting up",
+            urgent_reason="caller says it's an emergency",
+        )
+    )
+    assert call.priority == Priority.P3 and "urgent_reason ignored" in result
+    result = call.assess_situation(Facts(urgent_reason="water coming through the ceiling onto the panel"))
+    assert call.priority == Priority.P1 and "agent judgement" in result

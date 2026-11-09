@@ -7,7 +7,7 @@
 **Twilio:** not required. LiveKit sells numbers directly; an existing Twilio number can be pointed at LiveKit via SIP trunk with no code change.
 
 ## 2. The LLM never decides urgency, eligibility, availability or price
-The model extracts facts (`gas_smell`, `no_heat`, `indoor_temp_f`, `vulnerable_occupant`...) and `summit/triage.py` applies ordered rules. Same facts, same answer, every time; each call records which rules fired, so the owner can read *why* a call was P1. Thresholds are config.
+The model extracts facts (`gas_smell`, `no_heat`, `indoor_temp_f`, `vulnerable_occupant`...) and `summit/triage.py` applies ordered rules. Same facts, same answer, every time; each call records which rules fired, so the owner can read *why* a call was P1. Thresholds are config. One exception, upward only: decision 17.
 The same pattern holds for booking: the backend refuses rather than trusting the prompt. Prompt rules are for tone; code rules are for anything that costs money or safety.
 
 ## 3. Safety is conservative and short
@@ -58,6 +58,19 @@ A round-2 probe suite tried to get around each fix. The worst find: the agent as
 
 ## 16. Show the owner what it earned, from the records, with labelled estimates
 The brief asks for an agent; an owner buys booked jobs and fewer missed calls. So the dashboard has three owner views (Results, Follow-ups, Morning brief) built in `summit/insights.py` from what the agent already records: plain functions, no model, so a number on the board can be traced to calls. Dollar figures (average repair ticket, replacement value, per-minute costs) are estimates in `[insights]` in the TOML, printed on the page and meant to be replaced with the owner's own numbers; a replacement is counted as pipeline, never as booked revenue. Follow-ups are rules anyone can read: a system 15+ years old, a lapsed member, a non-member repair, a commercial lead, a triaged caller who didn't book. The demo's sample week is marked in the data (`sample-` call ids) and the dashboard says so whenever it's present.
+
+## 17. The model's judgement can raise priority, never lower it, and insisting isn't a reason
+A rule table can't list every reason waiting is unsafe ("water dripping onto the electrical panel", "he's on oxygen and it's 88 inside"). `assess_situation` takes an `urgent_reason`: the specific fact, in a few words. It can raise a call to P1 and is recorded as "agent judgement: ..." so the owner can read it; it can't lower anything, since priority never goes down within a request. The opposite failure is the caller who says "it's an emergency" about a flickering thermostat: a reason that is only about wanting someone fast is ignored in code and the model is told why. A hazard word in the reason ("smoke from the vents") is still P0.
+**Gave up:** the reserve can be spent on the model's word when it names a real-sounding fact. The reason is on the dashboard for the owner to check.
+
+## 18. Names are read back; bookings say a confirmation number
+Speech-to-text mishears names without flagging it, and a wrong name ends up on the ticket, on the technician's phone and in the next call's greeting. An unverified caller's first and last name must appear in what the agent said (whole, or spelled out letter by letter) before a booking goes through, and the prompt asks for a spelling when a name is unusual. A verified customer's name is already on the account. The fixed confirmation now ends with a confirmation number: the appointment number as four digits, which is what the office looks it up by.
+
+## 19. The caller's availability, more than one request per call, and a way out of a booking loop
+- **Availability:** `find_appointment_options` takes the days, a start date and after/before times the caller gave, and offers only windows wholly inside them. If nothing fits, it offers the nearest open windows and says so rather than ending in "no availability". What the caller said goes on the ticket.
+- **More than one request:** "and my mother's house too" used to hit "this call already booked". `start_another_request` archives the settled request (booked, called back or turned away) and starts triage, address and offers fresh; identity carries over, and an unverified caller's second booking lands on the customer record their first one created. It can't be used mid-request or on a P0 call, so it can't reset a refusal or drop a priority. The call record shows the most serious priority and the most telling outcome across requests, and a second request left unbooked at hang-up still gets its callback.
+- **Repeated failures:** after three refused booking attempts in a row on one request, the office gets a callback and an alert, once, and the caller is told. They can still carry on.
+**Not taken:** a per-technician calendar (40 named technicians, buffers between jobs). HVAC dispatch books arrival windows and assigns technicians the morning of, by route; booking a named technician over the phone promises something dispatch then has to keep. Capacity per window per county is what a caller's promise depends on.
 
 ## Cut for time (and what I'd do next)
 - **System of record:** real ServiceTitan / Housecall Pro integration behind `Store` (customer, location, job type, capacity, booking, notes).

@@ -141,3 +141,22 @@ def test_phone_numbers_in_tens_and_with_corrections(spoken, number):
 def test_a_home_above_a_shop_is_still_a_home_and_a_whole_building_is_not():
     assert property_kind("apartment above a store") == "residential"
     assert property_kind("the boiler for the whole apartment building") == "commercial"
+
+
+def test_markdown_is_flattened_for_the_voice():
+    from summit.speech import plain_speech
+
+    assert plain_speech("**Sure.** Here are the times: ") == "Sure. Here are the times: "
+    assert (
+        plain_speech("- tomorrow 8 to 10\n- Thursday noon to 2\n") == "tomorrow 8 to 10, Thursday noon to 2 "
+    )
+    # A phone number read back in groups keeps every digit, even streamed a sentence at a time.
+    assert plain_speech("555. ") == "555. "
+    assert plain_speech("Booking NAS-1104-0800-R now. ") == "Booking NAS-1104-0800-R now. "
+
+
+def test_the_confirmation_number_is_said_digit_by_digit():
+    from summit.speech import say_confirmation
+
+    assert say_confirmation(47) == "0 0 4 7"
+    assert say_confirmation(12345) == "1 2 3 4 5"
