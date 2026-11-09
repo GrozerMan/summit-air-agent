@@ -27,7 +27,14 @@ def test_every_tool_is_exposed(member_call):
 
 @pytest.mark.parametrize(
     "tool",
-    ["lookup_customer", "check_service_address", "book_appointment", "request_callback", "get_pricing"],
+    [
+        "lookup_customer",
+        "check_service_address",
+        "find_appointment_options",
+        "book_appointment",
+        "request_callback",
+        "get_pricing",
+    ],  # fmt: skip
 )
 def test_tool_arguments_match_the_backend(tool):
     agent_params = list(inspect.signature(getattr(SummitAgent, tool)).parameters)[2:]

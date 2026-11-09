@@ -331,18 +331,30 @@ class SummitAgent(Agent):
         context: RunContext,
         reschedule_appointment_id: int | None = None,
         caller_says_member: bool | None = None,
+        days: list[str] | None = None,
+        not_before: str | None = None,
+        after_time: str | None = None,
+        before_time: str | None = None,
     ) -> str:
         """Get arrival windows to offer. For a new visit, call it after assess_situation and
-        check_service_address. To move an existing appointment, pass its id.
+        check_service_address. To move an existing appointment, pass its id. If the caller has
+        said when they can be home, pass it so only windows that fit come back; leave the
+        availability fields empty if they haven't said.
 
         Args:
             reschedule_appointment_id: The id of the appointment being moved, if rescheduling.
             caller_says_member: For a caller who isn't verified: their answer when asked whether
                 they're already a member. Leave empty until you've asked.
+            days: Days they can be home: weekday names ("tuesday"), "weekdays", "weekend", or
+                dates as YYYY-MM-DD (work out "tomorrow" or "next Friday" from today's date).
+            not_before: The earliest date they can do, YYYY-MM-DD ("not until next week").
+            after_time: They're home from this time on, 24-hour HH:MM ("after 3" is 15:00).
+            before_time: They're home until this time, 24-hour HH:MM ("mornings" is 12:00).
         """
         args = dict(
-            reschedule_appointment_id=reschedule_appointment_id, caller_says_member=caller_says_member
-        )
+            reschedule_appointment_id=reschedule_appointment_id, caller_says_member=caller_says_member,
+            days=days, not_before=not_before, after_time=after_time, before_time=before_time,
+        )  # fmt: skip
         return self._run("find_appointment_options", args, lambda: self.call.find_appointment_options(**args))
 
     @function_tool

@@ -146,6 +146,7 @@ class RecordsMixin:
             "notes": self.notes,
             "false_claims": self.false_claims,
             "outcome": self.outcome,
+            "caller_availability": self.caller_availability,
             "metrics": self.metrics,
             "tools": self.tool_log,
         }

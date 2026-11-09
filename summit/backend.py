@@ -7,7 +7,7 @@ ActionRefused with a message telling the model exactly what to fix.
 
 import re
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from summit import config, pricing
@@ -16,13 +16,15 @@ from summit.identity import IdentityMixin
 from summit.models import ActionRefused, Appointment, Customer, Membership, Priority
 from summit.notify import Notifier
 from summit.records import RecordsMixin, close_abandoned_calls
-from summit.scheduling import AppointmentChanged, Option, Scheduler, say_day, say_window
+from summit.scheduling import AppointmentChanged, Option, Scheduler, say_day, say_window, window_bounds
 from summit.service_area import AreaCheck, area_name, check_town, check_zip, property_kind
 from summit.speech import normalize_phone, normalize_zip, say_confirmation, say_phone, spoken_digits
 from summit.store import Store
 from summit.triage import Assessment, Facts
 
 _NYC_COUNTIES = {"Kings", "Queens", "Bronx", "New York", "Richmond"}
+
+_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
 __all__ = ["ActionRefused", "CallSession", "caller_turn_to_screen", "close_abandoned_calls"]
@@ -96,6 +98,7 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         # asked to call back and finish it, rather than the caller being stuck in a loop.
         self.booking_failures = 0
         self.failure_callback_set = False
+        self.caller_availability: str | None = None
 
     def now(self) -> datetime:
         return self._clock().astimezone(self.tz)
@@ -205,9 +208,16 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
     # Scheduling
 
     def find_appointment_options(
-        self, reschedule_appointment_id: int | None = None, caller_says_member: bool | None = None
+        self,
+        reschedule_appointment_id: int | None = None,
+        caller_says_member: bool | None = None,
+        days: list[str] | None = None,
+        not_before: str | None = None,
+        after_time: str | None = None,
+        before_time: str | None = None,
     ) -> str:
         self._refuse_if_emergency()
+        fits, wanted = self._availability_filter(days, not_before, after_time, before_time)
         if reschedule_appointment_id is not None:
             appointment = self._own_appointment(reschedule_appointment_id)
             county, priority = appointment.county, appointment.priority
@@ -217,7 +227,21 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
             assert self.assessment and self.area and self.area.county
             county, priority = self.area.county, self.assessment.priority
 
-        options = self.scheduler.find_options(county, priority, self.is_member, self.now())
+        if wanted and wanted != self.caller_availability:
+            self.caller_availability = wanted
+            self.notes = [n for n in self.notes if not n.startswith("caller availability:")]
+            self.note(f"caller availability: {wanted}")
+        options = self.scheduler.find_options(county, priority, self.is_member, self.now(), fits=fits)
+        header = ""
+        if fits is not None and not options:
+            # Nothing open when they said they're home: offer what is open, and say so,
+            # rather than a dead end.
+            options = self.scheduler.find_options(county, priority, self.is_member, self.now())
+            if options:
+                header = f"Nothing open fits what they said ({wanted}). Say so, and offer these nearest open windows instead."
+                if priority == Priority.P1:
+                    hours = self.cfg["triage"]["p1_within_hours"]
+                    header += f" An urgent visit has to be within {hours} hours, so these are the options."
         if not options:
             if priority == Priority.P1:
                 return self._no_urgent_capacity()
@@ -239,15 +263,79 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
                 else ""
             )
             lines.append(f"- {option.option_id}: {option.speakable(today)}{surcharge}")
-        notes = [line for line in lines if not line.startswith("- ")]
-        windows = [line for line in lines if line.startswith("- ")]
         return (
-            "".join(f"{n}\n" for n in notes)
+            (f"{header}\n" if header else "")
             + "Offer these arrival windows, earliest first. The technician arrives within the window.\n"
-            + "\n".join(windows)
+            + "\n".join(lines)
             + "\nBook with the option_id the caller picks."
             + self._tech_details_reminder()
         )
+
+    def _availability_filter(
+        self,
+        days: list[str] | None,
+        not_before: str | None,
+        after_time: str | None,
+        before_time: str | None,
+    ) -> tuple[Callable[[date, str], bool] | None, str]:
+        """When the caller said they can be home, as a test on (day, window), and in words for
+        the ticket. A window fits only if it lies wholly inside what they said."""
+        weekdays: set[int] = set()
+        dates: set[date] = set()
+        problems = []
+        for raw in days or []:
+            word = raw.strip().lower()
+            if word in ("weekday", "weekdays"):
+                weekdays.update(range(5))
+            elif word in ("weekend", "weekends"):
+                weekdays.update((5, 6))
+            elif any(day.startswith(word[:3]) for day in _WEEKDAYS) and len(word) >= 3 and word.isalpha():
+                weekdays.add(next(i for i, day in enumerate(_WEEKDAYS) if day.startswith(word[:3])))
+            else:
+                try:
+                    dates.add(date.fromisoformat(word))
+                except ValueError:
+                    problems.append(f"days entry '{raw}' (use a weekday name, 'weekdays', or YYYY-MM-DD)")
+        earliest_day = None
+        if not_before:
+            try:
+                earliest_day = date.fromisoformat(not_before.strip())
+            except ValueError:
+                problems.append(f"not_before '{not_before}' (use YYYY-MM-DD)")
+        after, before = _clock(after_time), _clock(before_time)
+        if after_time and after is None:
+            problems.append(f"after_time '{after_time}' (use 24-hour HH:MM, e.g. 15:00)")
+        if before_time and before is None:
+            problems.append(f"before_time '{before_time}' (use 24-hour HH:MM, e.g. 12:00)")
+        if problems:
+            raise ActionRefused(
+                "Couldn't read the caller's availability: " + "; ".join(problems) + ". Try again."
+            )
+        if not (weekdays or dates or earliest_day or after or before):
+            return None, ""
+
+        def fits(day: date, window: str) -> bool:
+            start, end = window_bounds(window)
+            if (weekdays or dates) and day.weekday() not in weekdays and day not in dates:
+                return False
+            if earliest_day and day < earliest_day:
+                return False
+            if after and start < after:
+                return False
+            return not (before and end > before)
+
+        words = []
+        if weekdays or dates:
+            named = [_WEEKDAYS[i].capitalize() for i in sorted(weekdays)]
+            named += [f"{d:%A %B} {d.day}" for d in sorted(dates)]
+            words.append(" or ".join(named))
+        if earliest_day:
+            words.append(f"from {earliest_day:%A %B} {earliest_day.day}")
+        if after:
+            words.append(f"after {_say_clock(after)}")
+        if before:
+            words.append(f"before {_say_clock(before)}")
+        return fits, ", ".join(words)
 
     def _check_membership_asked(self, caller_says_member: bool | None) -> None:
         """No times exist until we know whether an unknown caller is already a member, so a
@@ -791,3 +879,28 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         )
 
     # Record keeping
+
+
+def _clock(text: str | None) -> time | None:
+    """'15:00', '3pm', '3:30 pm' -> a time. None if it can't be read."""
+    if not text:
+        return None
+    match = re.fullmatch(r"\s*(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?\s*m?\.?\s*", text.lower())
+    if not match:
+        return None
+    hour, minute, half = int(match[1]), int(match[2] or 0), match[3]
+    if half == "p" and hour < 12:
+        hour += 12
+    elif half == "a" and hour == 12:
+        hour = 0
+    if hour > 23 or minute > 59:
+        return None
+    return time(hour, minute)
+
+
+def _say_clock(t: time) -> str:
+    hour = t.hour % 12 or 12
+    suffix = "AM" if t.hour < 12 else "PM"
+    if t.hour == 12 and t.minute == 0:
+        return "noon"
+    return f"{hour}:{t.minute:02d} {suffix}" if t.minute else f"{hour} {suffix}"

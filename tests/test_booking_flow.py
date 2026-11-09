@@ -1,10 +1,12 @@
-"""Names read back, confirmation numbers, and the office taking over after repeated
-failed bookings."""
+"""Names read back, confirmation numbers, the caller's own availability, and the
+office taking over after repeated failed bookings."""
 
 import pytest
 from test_backend import GOOD_BOOKING, ready_to_book
 
 from summit.backend import ActionRefused
+from summit.models import Priority
+from summit.scheduling import window_bounds
 from summit.triage import Facts
 
 # Names
@@ -65,6 +67,67 @@ def test_the_confirmation_gives_the_appointment_number(make_call):
     appointment_id = call.booked[-1]
     spoken = " ".join(f"{appointment_id:04d}")
     assert f"Your confirmation number is {spoken}." in call.take_announcement()
+
+
+# The caller's availability
+
+
+def ready_for_times(call, facts=None):
+    call.assess_situation(facts or Facts(request_type="tune_up", description="tune-up"))
+    call.check_service_address(zip_code="11743", property_type="house")
+
+
+def test_only_windows_inside_the_callers_hours_are_offered(make_call):
+    call = make_call(None)
+    ready_for_times(call)
+    result = call.find_appointment_options(caller_says_member=False, after_time="14:00")
+    assert call.offered and "Nothing open fits" not in result
+    for option in call.offered.values():
+        assert window_bounds(option.window)[0].hour >= 14
+
+
+def test_days_and_mornings_narrow_the_windows(make_call):
+    call = make_call(None)
+    ready_for_times(call)
+    call.find_appointment_options(caller_says_member=False, days=["thursday", "friday"], before_time="12pm")
+    assert call.offered
+    for option in call.offered.values():
+        assert option.day.strftime("%A") in ("Thursday", "Friday")
+        assert window_bounds(option.window)[1].hour <= 12
+    assert any(n.startswith("caller availability: Thursday or Friday, before noon") for n in call.notes)
+
+
+def test_not_before_a_date(make_call):
+    call = make_call(None)
+    ready_for_times(call)
+    call.find_appointment_options(caller_says_member=False, not_before="2026-11-10")
+    assert call.offered and all(o.day.isoformat() >= "2026-11-10" for o in call.offered.values())
+
+
+def test_nothing_fitting_offers_the_nearest_and_says_so(make_call):
+    # Sundays only: routine work never goes out on a Sunday.
+    call = make_call(None)
+    ready_for_times(call)
+    result = call.find_appointment_options(caller_says_member=False, days=["sunday"])
+    assert result.startswith("Nothing open fits what they said (Sunday)")
+    assert call.offered
+
+
+def test_unreadable_availability_is_refused_with_the_format(make_call):
+    call = make_call(None)
+    ready_for_times(call)
+    with pytest.raises(ActionRefused, match="HH:MM"):
+        call.find_appointment_options(caller_says_member=False, after_time="after lunch")
+    with pytest.raises(ActionRefused, match="YYYY-MM-DD"):
+        call.find_appointment_options(caller_says_member=False, days=["someday"])
+
+
+def test_an_urgent_call_is_still_offered_its_24_hour_windows(make_call):
+    call = make_call(None)
+    ready_for_times(call, Facts(no_heat=True, vulnerable_occupant=True, description="no heat"))
+    assert call.priority == Priority.P1
+    result = call.find_appointment_options(caller_says_member=False, days=["2026-11-20"])
+    assert "has to be within 24 hours" in result and call.offered
 
 
 # The office takes over after repeated failures
