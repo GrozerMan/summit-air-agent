@@ -78,7 +78,7 @@ def case_vague_smell_ignored():
     call.check_service_address(zip_code="11787", property_type="house")
     text = call.find_appointment_options(caller_says_member=False)
     opt = next(line.split(":")[0].strip("- ").strip() for line in text.splitlines() if line.startswith("- "))
-    call.agent_said = "That's 631-555-0188 at 9 Oak Court, Smithtown?"
+    call.agent_said = "That's Tom Becker, 631-555-0188 at 9 Oak Court, Smithtown?"
     call.book_appointment(opt, "Tom", "Becker", "631-555-0188", "9 Oak Court, Smithtown", "11787", "furnace check", "",
                           True, True)
     transcript = t(call.greeting(), "There's a weird smell near the furnace and I'm not sure what it is.",
@@ -121,7 +121,7 @@ def control_vague_smell_asked():
     call.check_service_address(zip_code="11787", property_type="house")
     text = call.find_appointment_options(caller_says_member=False)
     opt = next(line.split(":")[0].strip("- ").strip() for line in text.splitlines() if line.startswith("- "))
-    call.agent_said = "That's 631-555-0188 at 9 Oak Court, Smithtown?"
+    call.agent_said = "That's Tom Becker, 631-555-0188 at 9 Oak Court, Smithtown?"
     call.book_appointment(opt, "Tom", "Becker", "631-555-0188", "9 Oak Court, Smithtown", "11787",
                           "furnace check", "", True, True)
     confirmation = call.take_announcement()

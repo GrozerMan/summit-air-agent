@@ -81,7 +81,7 @@ async def test_booking_confirmation_is_spoken_without_the_model(make_call):
     call.check_service_address(zip_code="11706", property_type="house")
     call.find_appointment_options(caller_says_member=False)
     option_id = next(iter(call.offered))
-    call.agent_said = "That's 631-555-0155, at 33 Shore Road, Bay Shore. Is that right?"
+    call.agent_said = "That's Jen Morales, 631-555-0155, at 33 Shore Road, Bay Shore. Is that right?"
     result = await agent.book_appointment(
         None, option_id, "Jen", "Morales", "631-555-0155", "33 Shore Road, Bay Shore", "11706",
         "tune-up", "", True, True,

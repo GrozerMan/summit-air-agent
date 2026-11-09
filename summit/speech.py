@@ -138,3 +138,10 @@ def plain_speech(text: str) -> str:
             out += ", " + line
     out = re.sub(r"\s{2,}", " ", out).strip()
     return f"{lead}{out}{trail}" if out else lead or trail
+
+
+def say_confirmation(appointment_id: int) -> str:
+    """The appointment number as four or more digits, said one by one ("0 0 4 7"), so it
+    sounds like a confirmation number and the caller can write it down. It's the number
+    the office looks the visit up by (appointment #47)."""
+    return " ".join(f"{appointment_id:04d}")

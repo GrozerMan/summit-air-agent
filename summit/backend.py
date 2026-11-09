@@ -18,7 +18,7 @@ from summit.notify import Notifier
 from summit.records import RecordsMixin, close_abandoned_calls
 from summit.scheduling import AppointmentChanged, Option, Scheduler, say_day, say_window
 from summit.service_area import AreaCheck, area_name, check_town, check_zip, property_kind
-from summit.speech import normalize_phone, normalize_zip, say_phone, spoken_digits
+from summit.speech import normalize_phone, normalize_zip, say_confirmation, say_phone, spoken_digits
 from summit.store import Store
 from summit.triage import Assessment, Facts
 
@@ -91,6 +91,11 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         self.agent_said = ""
         # Response times and usage, filled in at hang-up (summit/call_metrics.py).
         self.metrics: dict[str, Any] = {}
+
+        # Booking attempts refused in a row on this request. At the limit the office is
+        # asked to call back and finish it, rather than the caller being stuck in a loop.
+        self.booking_failures = 0
+        self.failure_callback_set = False
 
     def now(self) -> datetime:
         return self._clock().astimezone(self.tz)
@@ -350,6 +355,68 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         address_read_back_confirmed: bool,
         equipment: str | None = None,
         access_notes: str | None = None,
+        name_read_back_confirmed: bool | None = None,
+    ) -> str:
+        try:
+            result = self._book_appointment(
+                option_id, first_name, last_name, phone, address, zip_code, job_type, notes,
+                phone_read_back_confirmed, address_read_back_confirmed, equipment, access_notes,
+                name_read_back_confirmed,
+            )  # fmt: skip
+        except ActionRefused as refused:
+            if self.priority == Priority.P0:
+                raise
+            self.booking_failures += 1
+            raise ActionRefused(str(refused) + self._after_failed_booking(phone)) from None
+        self.booking_failures = 0
+        return result
+
+    def _after_failed_booking(self, phone: str) -> str:
+        """After the limit of refused bookings in a row, the office takes over: a callback and
+        an alert, once per request. The caller can still keep going if they'd rather."""
+        limit = self.cfg["escalation"]["max_booking_failures"]
+        if self.booking_failures < limit or self.failure_callback_set:
+            return ""
+        self.failure_callback_set = True
+        urgent = self.priority == Priority.P1
+        number = self.callback_phone or normalize_phone(phone)
+        self.notifier.alert(
+            self.call_id,
+            "urgent" if urgent else "info",
+            f"Agent couldn't complete a booking after {limit} tries for {self._who()}; office to finish it.",
+        )
+        self.note(f"booking failed {limit} times in a row; office to finish it")
+        if not number:
+            return (
+                f" That's {limit} tries without a booking. Ask for the best number to reach them and set a "
+                "callback (request_callback) so the office can finish it."
+            )
+        due = self._add_callback(
+            number, f"Booking failed {limit} times on the call; finish booking", urgent=urgent
+        )
+        if self.outcome is None:
+            self.outcome = "callback"
+        return (
+            f" That's {limit} tries without a booking, so a callback is now set: the office will call "
+            f"{say_phone(number)} {self._say_due(due, urgent)} to finish it. Tell the caller that. If they'd "
+            "rather keep going now, fix the above and try once more."
+        )
+
+    def _book_appointment(
+        self,
+        option_id: str,
+        first_name: str,
+        last_name: str,
+        phone: str,
+        address: str,
+        zip_code: str,
+        job_type: str,
+        notes: str,
+        phone_read_back_confirmed: bool,
+        address_read_back_confirmed: bool,
+        equipment: str | None,
+        access_notes: str | None,
+        name_read_back_confirmed: bool | None,
     ) -> str:
         option = self.offered.get(option_id)
         phone_e164 = normalize_phone(phone)
@@ -395,6 +462,18 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
                 f"ZIP {zip5 or zip_code} doesn't match the ZIP checked for the service area ({checked}); "
                 "confirm the address and run check_service_address again"
             )
+        if (
+            self.customer is None
+            and (first_name or "").strip()
+            and (last_name or "").strip()
+            and (name_read_back_confirmed is False or not self._read_back_name(first_name, last_name))
+        ):
+            # Speech-to-text mishears names without flagging it, and a wrong name ends up on the
+            # ticket, on the technician's phone and on the next call's greeting.
+            problems.append(
+                "read their first and last name back (ask them to spell it if it's unusual or you're unsure) "
+                "and get a yes"
+            )
         if not phone_read_back_confirmed or (phone_e164 and not self._read_back_phone(phone_e164)):
             problems.append("read the phone number back digit by digit and get a yes")
         if address and address.strip() and not re.search(r"\d", address):
@@ -434,7 +513,8 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         today = self.now().date()
         self.announcement = (
             f"You're booked. A technician will arrive {option.speakable(today)}, at {address.strip()}. "
-            f"{self._spoken_price(job_type, option.after_hours)} Is there anything else I can help with?"
+            f"{self._spoken_price(job_type, option.after_hours)} "
+            f"Your confirmation number is {say_confirmation(appointment_id)}. Is there anything else I can help with?"
         )
         return (
             f"Booked: appointment #{appointment_id}. This confirmation is being read to the caller word "
@@ -445,6 +525,18 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         """The agent actually said these ten digits, in any spoken form ("516-555-0142",
         "five one six, five five five, oh one four two")."""
         return phone_e164.removeprefix("+1") in spoken_digits(self.agent_said)
+
+    def _read_back_name(self, first_name: str, last_name: str) -> bool:
+        """The agent said both names, whole ("Ortiz") or spelled out ("O-R-T-I-Z")."""
+        said = self.agent_said.lower()
+        for name in (first_name, last_name):
+            letters = re.sub(r"[^a-z]", "", name.lower())
+            if not letters:
+                continue
+            pattern = r"(?<![a-z])" + r"[\s\-.,']*".join(letters) + r"(?![a-z])"
+            if not re.search(pattern, said):
+                return False
+        return True
 
     def _read_back_address(self, address: str) -> bool:
         """The agent said the house number and the street name."""
@@ -535,7 +627,8 @@ class CallSession(IdentityMixin, TriageMixin, RecordsMixin):
         today = self.now().date()
         self.announcement = (
             f"Done. Your {appointment.job_type} is now {option.speakable(today)}, and the old time has "
-            "been released. Is there anything else I can help with?"
+            f"been released. Your new confirmation number is {say_confirmation(new_id)}. "
+            "Is there anything else I can help with?"
         )
         return (
             f"Moved: appointment #{new_id}. This confirmation is being read to the caller word for word, "

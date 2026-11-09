@@ -361,9 +361,11 @@ class SummitAgent(Agent):
         address_read_back_confirmed: bool,
         equipment: str | None = None,
         access_notes: str | None = None,
+        name_read_back_confirmed: bool | None = None,
     ) -> str:
-        """Book the window the caller chose. Before calling, read the phone number back digit
-        by digit and the full address back, and hear them confirm both.
+        """Book the window the caller chose. Before calling, read their first and last name
+        back (ask them to spell it if it's unusual or you're unsure), the phone number back
+        digit by digit and the full address back, and hear them confirm each.
 
         Args:
             option_id: The option_id of the window they picked.
@@ -381,6 +383,9 @@ class SummitAgent(Agent):
             equipment: The system, if they know: furnace, boiler, heat pump, central AC, mini-split; gas,
                 oil or electric; roughly how old.
             access_notes: How the technician gets in: apartment number, gate or door code, pets, parking.
+            name_read_back_confirmed: You read their first and last name back (or spelled them)
+                and they said it's right. Not needed for a verified customer. The backend checks
+                that you actually said it.
         """
         args = dict(
             option_id=option_id, first_name=first_name, last_name=last_name, phone=phone,
@@ -388,6 +393,7 @@ class SummitAgent(Agent):
             phone_read_back_confirmed=phone_read_back_confirmed,
             address_read_back_confirmed=address_read_back_confirmed,
             equipment=equipment, access_notes=access_notes,
+            name_read_back_confirmed=name_read_back_confirmed,
         )  # fmt: skip
         return self._run("book_appointment", args, lambda: self.call.book_appointment(**args))
 

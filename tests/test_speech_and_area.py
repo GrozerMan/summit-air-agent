@@ -153,3 +153,10 @@ def test_markdown_is_flattened_for_the_voice():
     # A phone number read back in groups keeps every digit, even streamed a sentence at a time.
     assert plain_speech("555. ") == "555. "
     assert plain_speech("Booking NAS-1104-0800-R now. ") == "Booking NAS-1104-0800-R now. "
+
+
+def test_the_confirmation_number_is_said_digit_by_digit():
+    from summit.speech import say_confirmation
+
+    assert say_confirmation(47) == "0 0 4 7"
+    assert say_confirmation(12345) == "1 2 3 4 5"

@@ -226,6 +226,9 @@ simulated_load_seed = 42
 # Empty means no live transfers; requests become callbacks. HUMAN_TRANSFER_NUMBER overrides.
 human_transfer_number = ""
 urgent_callback_minutes = 30
+# After this many refused booking attempts in a row on one request, the office is asked
+# to call back and finish it (a callback and an alert), so a caller isn't stuck in a loop.
+max_booking_failures = 3
 callback_hours = 2
 
 [silence]
